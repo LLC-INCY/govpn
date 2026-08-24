@@ -1,0 +1,15 @@
+# Third-party notices
+
+WireGuard uses the official pure-Go protocol engine from
+`golang.zx2c4.com/wireguard`, licensed under the MIT License.
+
+gVisor is consumed as a Go module under the Apache License 2.0.
+
+OpenVPN LZO1X decompression uses the pure-Go `github.com/anchore/go-lzo`
+module, licensed under the MIT License.
+
+The SSTP and OpenVPN wire implementations in this repository were written
+from the published Microsoft SSTP/PPP RFCs and official OpenVPN protocol
+documentation. SoftEther has no published RFC; its wire implementation was
+written against the behavior and data formats of the official SoftEtherVPN
+source tree. No SoftEtherVPN C source is copied into this project.

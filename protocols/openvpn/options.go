@@ -1,0 +1,232 @@
+package openvpn
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/anchore/go-lzo"
+	protocol "github.com/bclswl0827/govpn/protocols/openvpn/internal"
+)
+
+func clientOptions(config Config) string {
+	cipherName := effectiveCipher(config)
+	auth := effectiveAuth(config)
+	keySize := 256
+	if strings.HasSuffix(strings.ToUpper(cipherName), "-CBC") {
+		keySize = 128
+	}
+	mtu := config.MTU
+	if mtu == 0 {
+		mtu = defaultMTU
+	}
+	options := fmt.Sprintf("V4,dev-type tun,link-mtu %d,tun-mtu %d,proto %s,cipher %s,auth %s,keysize %d,key-method 2,tls-client", mtu+49, mtu, clientProtocolOption(config), cipherName, auth, keySize)
+	if strings.EqualFold(config.Compression, "lzo") {
+		options += ",comp-lzo"
+	}
+	return options
+}
+
+func effectiveCipher(config Config) string {
+	if len(config.DataCiphers) != 0 {
+		return config.DataCiphers[0]
+	}
+	if config.Cipher != "" {
+		return normalizeCipherName(config.Cipher)
+	}
+	return "AES-256-GCM"
+}
+
+func effectiveAuth(config Config) string {
+	if config.Auth != "" {
+		return config.Auth
+	}
+	if strings.HasSuffix(strings.ToUpper(effectiveCipher(config)), "-CBC") {
+		return "SHA1"
+	}
+	return "SHA256"
+}
+
+func effectiveCompression(config Config) string {
+	if config.Compression == "" {
+		return "none"
+	}
+	return config.Compression
+}
+
+func effectiveMTU(mtu int) int {
+	if mtu == 0 {
+		return defaultMTU
+	}
+	return mtu
+}
+
+func clientPeerInfo(config Config) string {
+	peerInfo := "IV_VER=2.6.0\nIV_PROTO=990\nIV_NCP=2\nIV_CIPHERS=" + strings.Join(effectiveClientDataCiphers(config), ":") + "\n"
+	if strings.EqualFold(config.Compression, "lzo") {
+		peerInfo += "IV_LZO=1\n"
+	}
+	return peerInfo
+}
+
+func newClientDataCipher(config Config, key protocol.KeyPair) (dataCipher, error) {
+	return newDataCipher(effectiveCipher(config), effectiveAuth(config), key)
+}
+
+func newDataCipher(cipherName, auth string, key protocol.KeyPair) (dataCipher, error) {
+	if strings.HasSuffix(strings.ToUpper(cipherName), "-CBC") {
+		return protocol.NewCBCDataCipher(key, cipherName, auth)
+	}
+	return protocol.NewAEADDataCipher(key, cipherName)
+}
+
+func transportNetwork(config Config) string {
+	if config.Protocol == "" {
+		return "udp"
+	}
+	return strings.ToLower(config.Protocol)
+}
+
+func clientProtocolOption(config Config) string {
+	if strings.HasPrefix(transportNetwork(config), "tcp") {
+		return "TCPv4_CLIENT"
+	}
+	return "UDPv4_CLIENT"
+}
+
+func compressPacket(packet []byte, compression string) ([]byte, error) {
+	if compression == "" {
+		return packet, nil
+	}
+	if strings.EqualFold(compression, "lzo") {
+		return append([]byte{0xfa}, packet...), nil
+	}
+	return nil, errors.New("openvpn: unsupported compression")
+}
+
+func decompressPacket(packet []byte, compression string) ([]byte, error) {
+	if compression == "" {
+		return packet, nil
+	}
+	if len(packet) == 0 {
+		return nil, errors.New("openvpn: empty compressed packet")
+	}
+	switch packet[0] {
+	case 0xfa:
+		return packet[1:], nil
+	case 0x66:
+		// An IPv4 or IPv6 packet cannot exceed 65,535 bytes. Keeping a fixed
+		// output bound also prevents a malformed compressed packet from causing
+		// unbounded allocation.
+		output := make([]byte, 65535)
+		length, err := lzo.Decompress(packet[1:], output)
+		if err != nil {
+			return nil, fmt.Errorf("openvpn: decompress LZO payload: %w", err)
+		}
+		return output[:length], nil
+	default:
+		return nil, fmt.Errorf("openvpn: invalid compression marker 0x%02x", packet[0])
+	}
+}
+
+func serverOptions(config ServerConfig, cipherName string) string {
+	mtu := effectiveMTU(config.MTU)
+	keySize := cipherKeySize(cipherName)
+	proto := "UDPv4_SERVER"
+	if strings.HasPrefix(strings.ToLower(config.Protocol), "tcp") {
+		proto = "TCPv4_SERVER"
+	}
+	return fmt.Sprintf("V4,dev-type tun,link-mtu %d,tun-mtu %d,proto %s,cipher %s,auth %s,keysize %d,key-method 2,tls-server", mtu+49, mtu, proto, cipherName, effectiveServerAuth(config), keySize)
+}
+
+func cipherKeySize(name string) int {
+	switch normalizeCipherName(name) {
+	case "AES-128-GCM", "AES-128-CBC", "BF-CBC":
+		return 128
+	case "AES-192-GCM", "AES-192-CBC":
+		return 192
+	default:
+		return 256
+	}
+}
+
+func effectiveServerAuth(config ServerConfig) string {
+	if config.Auth != "" {
+		return config.Auth
+	}
+	return "SHA256"
+}
+
+type pushedOptions struct {
+	address      netip.Addr
+	prefixBits   int
+	cipher       string
+	pingInterval time.Duration
+	pingTimeout  time.Duration
+}
+
+func parsePushReply(reply string) (netip.Addr, int, error) {
+	options, err := parsePushOptions(reply)
+	return options.address, options.prefixBits, err
+}
+
+func parsePushOptions(reply string) (pushedOptions, error) {
+	if !strings.HasPrefix(reply, "PUSH_REPLY,") {
+		return pushedOptions{}, errors.New("openvpn: invalid PUSH_REPLY")
+	}
+	var result pushedOptions
+	hasAddress := false
+	for _, option := range strings.Split(strings.TrimPrefix(reply, "PUSH_REPLY,"), ",") {
+		fields := strings.Fields(option)
+		if len(fields) == 3 && fields[0] == "ifconfig" {
+			address, err := netip.ParseAddr(fields[1])
+			if err != nil || !address.Is4() {
+				continue
+			}
+			result.address = address
+			if maskIP := net.ParseIP(fields[2]).To4(); maskIP != nil {
+				bits, total := net.IPMask(maskIP).Size()
+				if bits >= 0 && total == 32 {
+					result.prefixBits = bits
+					hasAddress = true
+					continue
+				}
+			}
+			peer, peerErr := netip.ParseAddr(fields[2])
+			if peerErr == nil && peer.Is4() {
+				result.prefixBits = 32
+				hasAddress = true
+			}
+			continue
+		}
+		if len(fields) == 2 && (fields[0] == "ping" || fields[0] == "ping-restart" || fields[0] == "ping-exit") {
+			seconds, err := strconv.Atoi(fields[1])
+			if err != nil || seconds < 0 || seconds > 86400 {
+				return pushedOptions{}, fmt.Errorf("openvpn: invalid PUSH_REPLY %s value", fields[0])
+			}
+			duration := time.Duration(seconds) * time.Second
+			if fields[0] == "ping" {
+				result.pingInterval = duration
+			} else {
+				result.pingTimeout = duration
+			}
+		}
+		if len(fields) == 2 && fields[0] == "cipher" {
+			if !supportedDataCipher(fields[1]) {
+				return pushedOptions{}, fmt.Errorf("openvpn: server selected unsupported cipher %q", fields[1])
+			}
+			result.cipher = normalizeCipherName(fields[1])
+		}
+	}
+	if !hasAddress {
+		return pushedOptions{}, errors.New("openvpn: PUSH_REPLY has no valid ifconfig")
+	}
+	if result.cipher == "" {
+		result.cipher = "AES-256-GCM"
+	}
+	return result, nil
+}
