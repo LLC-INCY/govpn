@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"sync"
 
@@ -14,6 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/raw"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
@@ -36,6 +38,8 @@ type Stack struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	done      chan struct{}
+	addressMu sync.Mutex
+	closed    bool
 	closeOnce sync.Once
 	closeErr  error
 	wg        sync.WaitGroup
@@ -57,9 +61,10 @@ func New(addresses []netip.Prefix, mtu uint32, device packetDevice) (*Stack, err
 		TransportProtocols: []stack.TransportProtocolFactory{
 			tcp.NewProtocol, udp.NewProtocol, icmp.NewProtocol4, icmp.NewProtocol6,
 		},
+		RawFactory: raw.EndpointFactory{},
 	})
 	link := channel.New(1024, mtu, "")
-	if err := ns.CreateNIC(nicID, link); err != nil {
+	if err := ns.CreateNICWithOptions(nicID, link, stack.NICOptions{DeliverLinkPackets: true}); err != nil {
 		ns.Destroy()
 		return nil, fmt.Errorf("govpn: create gVisor NIC: %s", err)
 	}
@@ -102,13 +107,76 @@ func New(addresses []netip.Prefix, mtu uint32, device packetDevice) (*Stack, err
 }
 
 func (s *Stack) Addresses() []netip.Prefix {
+	s.addressMu.Lock()
+	defer s.addressMu.Unlock()
 	return append([]netip.Prefix(nil), s.addresses...)
 }
 
 func (s *Stack) Done() <-chan struct{} { return s.done }
 
+// AddAddress adds an address that can receive packets in the userspace stack.
+// It does not change host networking.
+func (s *Stack) AddAddress(prefix netip.Prefix) error {
+	if !prefix.IsValid() || prefix.Addr().Zone() != "" {
+		return errors.New("govpn: invalid userspace address")
+	}
+	prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits())
+	protocol, address := protocolAddress(prefix.Addr(), prefix.Bits())
+	s.addressMu.Lock()
+	defer s.addressMu.Unlock()
+	if s.closed {
+		return net.ErrClosed
+	}
+	for _, existing := range s.addresses {
+		if existing == prefix {
+			return nil
+		}
+	}
+	if err := s.stack.AddProtocolAddress(nicID, tcpip.ProtocolAddress{
+		Protocol:          protocol,
+		AddressWithPrefix: address,
+	}, stack.AddressProperties{}); err != nil {
+		return fmt.Errorf("govpn: add userspace address %s: %s", prefix, err)
+	}
+	s.addresses = append(s.addresses, prefix)
+	return nil
+}
+
+// RemoveAddress removes an address previously added to the userspace stack.
+// It does not change host networking.
+func (s *Stack) RemoveAddress(prefix netip.Prefix) error {
+	if !prefix.IsValid() || prefix.Addr().Zone() != "" {
+		return errors.New("govpn: invalid userspace address")
+	}
+	prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits())
+	_, address := protocolAddress(prefix.Addr(), prefix.Bits())
+	s.addressMu.Lock()
+	defer s.addressMu.Unlock()
+	if s.closed {
+		return net.ErrClosed
+	}
+	index := -1
+	for i, existing := range s.addresses {
+		if existing == prefix {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return nil
+	}
+	if err := s.stack.RemoveAddress(nicID, address.Address); err != nil {
+		return fmt.Errorf("govpn: remove userspace address %s: %s", prefix, err)
+	}
+	s.addresses = append(s.addresses[:index], s.addresses[index+1:]...)
+	return nil
+}
+
 func (s *Stack) Close() error {
 	s.closeOnce.Do(func() {
+		s.addressMu.Lock()
+		s.closed = true
+		s.addressMu.Unlock()
 		s.cancel()
 		s.link.Close()
 		deviceErr := s.device.Close()

@@ -41,6 +41,55 @@ packetConn, err := session.ListenPacket("udp", "10.0.0.2:5353")
 These sockets are not visible on the host. Use an explicit proxy when a host
 application needs access to a session socket.
 
+ICMP is available through the same userspace stack. The connection carries
+ICMP messages, not host raw sockets:
+
+```go
+conn, err := session.DialICMP4("10.0.0.1")
+if err != nil {
+	return err
+}
+defer conn.Close()
+
+if err := conn.SetTTL(1); err != nil {
+	return err
+}
+_, err = conn.Write([]byte{8, 0, 0, 0, 0, 1, 0, 1})
+```
+
+`ReadFrom` returns the ICMP message and the source IP. Use type 0 replies for
+ping and type 11 (IPv4) or type 3 (IPv6) errors for traceroute. IPv4 checksums
+are filled automatically. `DialICMP6` and `SetHopLimit` provide the IPv6
+equivalent. Traceroute replies from intermediate routers are delivered as
+usual. This does not redirect the host `ping` command.
+
+## Host port forwarding
+
+`RegisterPortForward` exposes a host service at the VPN address assigned to the
+userspace stack. In this example, the VPN address is `172.20.0.2` and the host
+service is `10.0.0.200:8080`.
+
+```go
+forward, err := session.RegisterPortForward(ctx, govpn.PortForwardSpec{
+	Network:       "tcp4",
+	ListenAddress: "172.20.0.2:18080",
+	TargetAddress: "10.0.0.200:8080",
+})
+if err != nil {
+	return err
+}
+defer forward.Close()
+```
+
+The remote peer connects to `172.20.0.2:18080`. The listen address belongs to
+the userspace VPN stack; the target address is reached through the host
+network. Registering a forward does not change host routes, firewall rules, or
+DNS settings.
+
+To preserve the host address as the remote destination, use
+`ListenAddress: "10.0.0.200:8080"` instead. The VPN peer must then route
+`10.0.0.200/32` to this peer.
+
 ## WireGuard client
 
 ```go

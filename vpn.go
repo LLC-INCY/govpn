@@ -52,7 +52,23 @@ type Session struct {
 	terminalErr    error
 	closeOnce      sync.Once
 	closeErr       error
+	forwardMu      sync.Mutex
+	forwardAliases map[netip.Addr]int
+	forwards       map[*PortForward]struct{}
+	closed         bool
 }
+
+type ICMPConn interface {
+	net.PacketConn
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	SetTTL(int) error
+	SetHopLimit(int) error
+}
+
+// ErrSessionClosed indicates that a session no longer accepts new sockets or
+// port forwards.
+var ErrSessionClosed = net.ErrClosed
 
 // NewSession connects a running protocol packet device to a new gVisor stack.
 // closeTransport tears down the protocol, while done reports its terminal
@@ -67,7 +83,13 @@ func NewSession(addresses []netip.Prefix, mtu uint32, device PacketDevice, close
 		_ = device.Close()
 		return nil, err
 	}
-	session := &Session{stack: s, closeTransport: closeTransport, terminalDone: make(chan struct{})}
+	session := &Session{
+		stack:          s,
+		closeTransport: closeTransport,
+		terminalDone:   make(chan struct{}),
+		forwardAliases: make(map[netip.Addr]int),
+		forwards:       make(map[*PortForward]struct{}),
+	}
 	if done != nil {
 		go func() {
 			err := <-done
@@ -75,8 +97,7 @@ func NewSession(addresses []netip.Prefix, mtu uint32, device PacketDevice, close
 			session.terminalErr = err
 			session.terminalMu.Unlock()
 			close(session.terminalDone)
-			_ = session.closeTransport()
-			_ = session.stack.Close()
+			_ = session.Close()
 		}()
 	}
 	return session, nil
@@ -103,6 +124,42 @@ func (s *Session) Listen(network, address string) (net.Listener, error) {
 // ListenPacket opens a UDP socket inside the VPN address space.
 func (s *Session) ListenPacket(network, address string) (net.PacketConn, error) {
 	return s.stack.ListenPacket(network, address)
+}
+
+func (s *Session) DialICMPContext(ctx context.Context, network, address string) (ICMPConn, error) {
+	return s.stack.DialICMPContext(ctx, network, address)
+}
+
+func (s *Session) DialICMP(network, address string) (ICMPConn, error) {
+	return s.DialICMPContext(context.Background(), network, address)
+}
+
+func (s *Session) DialICMP4Context(ctx context.Context, address string) (ICMPConn, error) {
+	return s.DialICMPContext(ctx, "icmp4", address)
+}
+
+func (s *Session) DialICMP4(address string) (ICMPConn, error) {
+	return s.DialICMP4Context(context.Background(), address)
+}
+
+func (s *Session) DialICMP6Context(ctx context.Context, address string) (ICMPConn, error) {
+	return s.DialICMPContext(ctx, "icmp6", address)
+}
+
+func (s *Session) DialICMP6(address string) (ICMPConn, error) {
+	return s.DialICMP6Context(context.Background(), address)
+}
+
+func (s *Session) ListenICMP(network, address string) (ICMPConn, error) {
+	return s.stack.ListenICMP(network, address)
+}
+
+func (s *Session) ListenICMP4(address string) (ICMPConn, error) {
+	return s.ListenICMP("icmp4", address)
+}
+
+func (s *Session) ListenICMP6(address string) (ICMPConn, error) {
+	return s.ListenICMP("icmp6", address)
 }
 
 // Wait blocks until the protocol terminates, the session is closed, or ctx is
@@ -136,6 +193,16 @@ func (s *Session) protocolError() error {
 
 // Close tears down the protocol transport and gVisor stack. It is idempotent.
 func (s *Session) Close() error {
+	s.forwardMu.Lock()
+	s.closed = true
+	forwards := make([]*PortForward, 0, len(s.forwards))
+	for forward := range s.forwards {
+		forwards = append(forwards, forward)
+	}
+	s.forwardMu.Unlock()
+	for _, forward := range forwards {
+		_ = forward.Close()
+	}
 	s.closeOnce.Do(func() {
 		transportErr := s.closeTransport()
 		stackErr := s.stack.Close()
