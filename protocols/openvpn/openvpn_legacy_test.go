@@ -2,6 +2,7 @@ package openvpn
 
 import (
 	"bytes"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -68,5 +69,15 @@ func TestParsePushOptionsKeepalive(t *testing.T) {
 	}
 	if options.pingInterval != 10*time.Second || options.pingTimeout != time.Minute {
 		t.Fatalf("keepalive = ping %s, timeout %s", options.pingInterval, options.pingTimeout)
+	}
+}
+
+func TestParsePushOptionsIPv6(t *testing.T) {
+	options, err := parsePushOptions("PUSH_REPLY,ifconfig-ipv6 2001:db8:1::2/64 2001:db8:1::1,cipher AES-256-GCM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.address.IsValid() || options.address6 != netip.MustParseAddr("2001:db8:1::2") || options.prefixBits6 != 64 {
+		t.Fatalf("IPv6 tunnel address = %s/%d", options.address6, options.prefixBits6)
 	}
 }

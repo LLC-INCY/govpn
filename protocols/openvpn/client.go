@@ -134,7 +134,7 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = endpoint.Close()
 		return nil, fmt.Errorf("openvpn: server selected cipher %s outside data-ciphers", pushed.cipher)
 	}
-	c.logf("tunnel parameters received: address=%s/%d cipher=%s ping=%s receive-timeout=%s", pushed.address, pushed.prefixBits, pushed.cipher, pushed.pingInterval, pushed.pingTimeout)
+	c.logf("tunnel parameters received: address=%s/%d address6=%s/%d cipher=%s ping=%s receive-timeout=%s", pushed.address, pushed.prefixBits, pushed.address6, pushed.prefixBits6, pushed.cipher, pushed.pingInterval, pushed.pingTimeout)
 	keys := protocol.DeriveKeys(clientSource, serverMessage.Source, endpoint.LocalSessionID(), endpoint.RemoteSessionID())
 	sendCipher, err := newDataCipher(pushed.cipher, effectiveAuth(config), keys.Client)
 	if err != nil {
@@ -158,7 +158,14 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	transport := newTransport(endpoint, device, sendCipher, receiveCipher, config.Compression, pushed.pingInterval, pushed.pingTimeout, config.Logger)
 	done := make(chan error, 1)
 	go transport.run(done)
-	session, err := govpn.NewSession([]netip.Prefix{netip.PrefixFrom(pushed.address, pushed.prefixBits)}, uint32(mtu), device, transport.Close, done)
+	addresses := make([]netip.Prefix, 0, 2)
+	if pushed.address.IsValid() {
+		addresses = append(addresses, netip.PrefixFrom(pushed.address, pushed.prefixBits))
+	}
+	if pushed.address6.IsValid() {
+		addresses = append(addresses, netip.PrefixFrom(pushed.address6, pushed.prefixBits6))
+	}
+	session, err := govpn.NewSession(addresses, uint32(mtu), device, transport.Close, done)
 	if err != nil {
 		return nil, err
 	}

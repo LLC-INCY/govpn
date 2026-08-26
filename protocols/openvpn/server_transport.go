@@ -38,7 +38,7 @@ func (s *serverTransport) Close() error {
 	return err
 }
 
-func (s *serverTransport) accept(tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, done chan<- error) {
+func (s *serverTransport) accept(tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, network6 netip.Prefix, gateway6, assigned6 netip.Addr, done chan<- error) {
 	buffer := make([]byte, 65535)
 	n, peer, err := s.packetConn.ReadFrom(buffer)
 	if err != nil {
@@ -58,7 +58,7 @@ func (s *serverTransport) accept(tlsConfig *tls.Config, network netip.Prefix, ga
 		done <- err
 		return
 	}
-	child, err := establishServerSession(protectedConn, firstDatagram, s.device, s.config, tlsConfig, network, gateway, assigned)
+	child, err := establishServerSession(protectedConn, firstDatagram, s.device, s.config, tlsConfig, network, gateway, assigned, network6, gateway6, assigned6)
 	if err != nil {
 		_ = s.Close()
 		done <- err

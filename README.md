@@ -144,7 +144,7 @@ address when the current candidate does not respond.
 | --------------------- | -------------------------------------------------------------------------------- |
 | `protocols/wireguard` | Official `wireguard-go` engine, IPv4/IPv6, PSK, roaming, keepalive, runtime UAPI |
 | `protocols/sstp`      | TLS, SSTP, PPP, LCP, PAP, IPCP, crypto binding                                   |
-| `protocols/openvpn`   | UDP/TCP, TLS, `tls-auth`, `tls-crypt`, AEAD/CBC ciphers, LZO                     |
+| `protocols/openvpn`   | UDP/TCP IPv4/IPv6, TLS, `tls-auth`, `tls-crypt`, AEAD/CBC ciphers, LZO           |
 | `protocols/softether` | Native SoftEther HTTPS/PACK login and Ethernet data channel                      |
 
 Each package provides `NewClient` and `NewServer`. Complete programs are under
@@ -164,7 +164,6 @@ go run ./examples/softether/client -h
   parsed but not applied to the host.
 - SSTP supports PAP authentication; MS-CHAPv2, EAP, and IPv6CP are not yet
   implemented.
-- OpenVPN does not provide an IPv6 server address pool.
 - SoftEther does not provide UDP acceleration, R-UDP bulk mode, additional TCP
   connections, half connections, or QoS.
 

@@ -92,8 +92,15 @@ func transportNetwork(config Config) string {
 }
 
 func clientProtocolOption(config Config) string {
-	if strings.HasPrefix(transportNetwork(config), "tcp") {
+	network := transportNetwork(config)
+	if strings.HasPrefix(network, "tcp") {
+		if network == "tcp6" {
+			return "TCPv6_CLIENT"
+		}
 		return "TCPv4_CLIENT"
+	}
+	if network == "udp6" {
+		return "UDPv6_CLIENT"
 	}
 	return "UDPv4_CLIENT"
 }
@@ -137,8 +144,14 @@ func serverOptions(config ServerConfig, cipherName string) string {
 	mtu := effectiveMTU(config.MTU)
 	keySize := cipherKeySize(cipherName)
 	proto := "UDPv4_SERVER"
-	if strings.HasPrefix(strings.ToLower(config.Protocol), "tcp") {
+	network := strings.ToLower(config.Protocol)
+	if strings.HasPrefix(network, "tcp") {
 		proto = "TCPv4_SERVER"
+		if network == "tcp6" {
+			proto = "TCPv6_SERVER"
+		}
+	} else if network == "udp6" {
+		proto = "UDPv6_SERVER"
 	}
 	return fmt.Sprintf("V4,dev-type tun,link-mtu %d,tun-mtu %d,proto %s,cipher %s,auth %s,keysize %d,key-method 2,tls-server", mtu+49, mtu, proto, cipherName, effectiveServerAuth(config), keySize)
 }
@@ -164,6 +177,8 @@ func effectiveServerAuth(config ServerConfig) string {
 type pushedOptions struct {
 	address      netip.Addr
 	prefixBits   int
+	address6     netip.Addr
+	prefixBits6  int
 	cipher       string
 	pingInterval time.Duration
 	pingTimeout  time.Duration
@@ -203,6 +218,16 @@ func parsePushOptions(reply string) (pushedOptions, error) {
 			}
 			continue
 		}
+		if len(fields) == 3 && fields[0] == "ifconfig-ipv6" {
+			prefix, err := netip.ParsePrefix(fields[1])
+			if err != nil || !prefix.Addr().Is6() {
+				continue
+			}
+			result.address6 = prefix.Addr()
+			result.prefixBits6 = prefix.Bits()
+			hasAddress = true
+			continue
+		}
 		if len(fields) == 2 && (fields[0] == "ping" || fields[0] == "ping-restart" || fields[0] == "ping-exit") {
 			seconds, err := strconv.Atoi(fields[1])
 			if err != nil || seconds < 0 || seconds > 86400 {
@@ -223,7 +248,7 @@ func parsePushOptions(reply string) (pushedOptions, error) {
 		}
 	}
 	if !hasAddress {
-		return pushedOptions{}, errors.New("openvpn: PUSH_REPLY has no valid ifconfig")
+		return pushedOptions{}, errors.New("openvpn: PUSH_REPLY has no valid tunnel address")
 	}
 	if result.cipher == "" {
 		result.cipher = "AES-256-GCM"

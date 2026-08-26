@@ -29,9 +29,19 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	network, gateway, assigned, err := poolAddresses(s.Config.Pool)
-	if err != nil {
-		return nil, err
+	var network, network6 netip.Prefix
+	var gateway, assigned, gateway6, assigned6 netip.Addr
+	if s.Config.Pool != "" {
+		network, gateway, assigned, err = poolAddresses(s.Config.Pool)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if s.Config.Pool6 != "" {
+		network6, gateway6, assigned6, err = poolAddresses6(s.Config.Pool6)
+		if err != nil {
+			return nil, err
+		}
 	}
 	listenAddress := net.JoinHostPort(s.Config.ListenIP, strconv.Itoa(s.Config.ListenPort))
 	mtu := effectiveMTU(s.Config.MTU)
@@ -49,7 +59,7 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 		}
 		transport := newServerStreamTransport(listener, device, s.Config)
 		closeTransport = transport.Close
-		go transport.accept(tlsConfig, network, gateway, assigned, done)
+		go transport.accept(tlsConfig, network, gateway, assigned, network6, gateway6, assigned6, done)
 	} else {
 		packetConn, listenErr := net.ListenPacket(serverTransportNetwork(s.Config), listenAddress)
 		if listenErr != nil {
@@ -58,7 +68,7 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 		}
 		transport := newServerTransport(packetConn, device, s.Config)
 		closeTransport = transport.Close
-		go transport.accept(tlsConfig, network, gateway, assigned, done)
+		go transport.accept(tlsConfig, network, gateway, assigned, network6, gateway6, assigned6, done)
 	}
 	select {
 	case <-ctx.Done():
@@ -66,7 +76,14 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 		return nil, ctx.Err()
 	default:
 	}
-	return govpn.NewSession([]netip.Prefix{netip.PrefixFrom(gateway, network.Bits())}, uint32(mtu), device, closeTransport, done)
+	addresses := make([]netip.Prefix, 0, 2)
+	if network.IsValid() {
+		addresses = append(addresses, netip.PrefixFrom(gateway, network.Bits()))
+	}
+	if network6.IsValid() {
+		addresses = append(addresses, netip.PrefixFrom(gateway6, network6.Bits()))
+	}
+	return govpn.NewSession(addresses, uint32(mtu), device, closeTransport, done)
 }
 
 func serverTransportNetwork(config ServerConfig) string {

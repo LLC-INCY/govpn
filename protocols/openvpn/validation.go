@@ -90,8 +90,8 @@ func validateServer(config ServerConfig) error {
 	if config.VerifyClientCert != "" && config.VerifyClientCert != "require" && config.VerifyClientCert != "optional" && config.VerifyClientCert != "none" {
 		return errors.New("openvpn: verify-client-cert must be require, optional, or none")
 	}
-	if config.Pool6 != "" {
-		return errors.New("openvpn: IPv6 pool is not implemented")
+	if config.Pool == "" && config.Pool6 == "" {
+		return errors.New("openvpn: IPv4 or IPv6 address pool is required")
 	}
 	if config.MTU < 0 || config.MTU > 65535 || (config.MTU != 0 && config.MTU < 576) {
 		return errors.New("openvpn: MTU is out of range")

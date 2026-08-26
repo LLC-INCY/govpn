@@ -38,7 +38,7 @@ func (s *serverStreamTransport) Close() error {
 	return err
 }
 
-func (s *serverStreamTransport) accept(tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, done chan<- error) {
+func (s *serverStreamTransport) accept(tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, network6 netip.Prefix, gateway6, assigned6 netip.Addr, done chan<- error) {
 	rawConn, err := s.listener.Accept()
 	if err != nil {
 		done <- normalizeError(err)
@@ -58,7 +58,7 @@ func (s *serverStreamTransport) accept(tlsConfig *tls.Config, network netip.Pref
 		done <- err
 		return
 	}
-	child, err := establishServerSession(protectedConn, first[:n], s.device, s.config, tlsConfig, network, gateway, assigned)
+	child, err := establishServerSession(protectedConn, first[:n], s.device, s.config, tlsConfig, network, gateway, assigned, network6, gateway6, assigned6)
 	if err != nil {
 		_ = s.Close()
 		done <- err

@@ -12,7 +12,7 @@ import (
 	protocol "github.com/bclswl0827/govpn/protocols/openvpn/internal"
 )
 
-func establishServerSession(conn net.Conn, firstDatagram []byte, device *packet.Device, config ServerConfig, tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr) (*transport, error) {
+func establishServerSession(conn net.Conn, firstDatagram []byte, device *packet.Device, config ServerConfig, tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, network6 netip.Prefix, gateway6, assigned6 netip.Addr) (*transport, error) {
 	endpoint, err := protocol.ServerEndpoint(conn, firstDatagram)
 	if err != nil {
 		return nil, err
@@ -52,8 +52,15 @@ func establishServerSession(conn net.Conn, firstDatagram []byte, device *packet.
 	if command != "PUSH_REQUEST" {
 		return nil, errors.New("openvpn: expected PUSH_REQUEST")
 	}
-	netmask := prefixNetmask(network.Bits())
-	push := fmt.Sprintf("PUSH_REPLY,ifconfig %s %s,route-gateway %s,topology subnet,cipher %s", assigned, netmask, gateway, selectedCipher)
+	push := "PUSH_REPLY"
+	if network.IsValid() {
+		netmask := prefixNetmask(network.Bits())
+		push += fmt.Sprintf(",ifconfig %s %s,route-gateway %s,topology subnet", assigned, netmask, gateway)
+	}
+	if network6.IsValid() {
+		push += fmt.Sprintf(",ifconfig-ipv6 %s/%d %s", assigned6, network6.Bits(), gateway6)
+	}
+	push += fmt.Sprintf(",cipher %s", selectedCipher)
 	if err := protocol.WriteCommand(tlsConn, push); err != nil {
 		return nil, err
 	}

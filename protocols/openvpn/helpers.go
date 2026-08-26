@@ -26,6 +26,19 @@ func poolAddresses(value string) (netip.Prefix, netip.Addr, netip.Addr, error) {
 	return network, gateway, gateway.Next(), nil
 }
 
+func poolAddresses6(value string) (netip.Prefix, netip.Addr, netip.Addr, error) {
+	network, err := netip.ParsePrefix(value)
+	if err != nil || !network.Addr().Is6() {
+		return netip.Prefix{}, netip.Addr{}, netip.Addr{}, fmt.Errorf("openvpn: invalid IPv6 pool %q", value)
+	}
+	network = network.Masked()
+	if network.Bits() > 126 {
+		return netip.Prefix{}, netip.Addr{}, netip.Addr{}, errors.New("openvpn: IPv6 pool has fewer than two usable addresses")
+	}
+	gateway := network.Addr().Next()
+	return network, gateway, gateway.Next(), nil
+}
+
 func prefixNetmask(bits int) string {
 	mask := net.CIDRMask(bits, 32)
 	return net.IP(mask).String()

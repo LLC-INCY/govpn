@@ -18,9 +18,10 @@ import (
 
 const minimumIPv6MTU = 1280
 
-// Give wireguard-go enough time to perform multiple native handshake retries
-// before treating an endpoint as unavailable. Its retry interval is 5 seconds.
-const endpointFailoverDelay = 15 * time.Second
+// Switch shortly before wireguard-go's native retry timer fires so the next
+// handshake initiation is sent to the next endpoint candidate. Candidates are
+// cycled until one completes a handshake.
+const endpointFailoverDelay = device.RekeyTimeout - time.Second
 
 func start(addresses []netip.Prefix, mtu int, uapi string, peers []Peer, logger *log.Logger) (*govpn.Session, *Runtime, error) {
 	memory, err := packet.New("wireguard", mtu)
