@@ -132,6 +132,12 @@ WireGuard configuration files can also be loaded with
 `wireguard.ParseConfigFile`. Runtime state and peer updates are available
 through `Client.Runtime`, `Client.Status`, and the raw UAPI methods.
 
+For a dual-stack peer endpoint, the optional `EndpointPreference` peer setting
+controls DNS candidate order: `auto` keeps resolver order, `ipv4` prefers A
+records, and `ipv6` prefers AAAA records. The default is `auto`. Before the
+first successful handshake, govpn automatically tries the next resolved
+address when the current candidate does not respond.
+
 ## Protocols
 
 | Package               | Implementation                                                                   |

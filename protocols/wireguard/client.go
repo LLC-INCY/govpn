@@ -33,11 +33,14 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	if mtu == 0 {
 		return nil, fmt.Errorf("wireguard: invalid MTU %d", c.Config.MTU)
 	}
+	if err := validateAddressMTU(addresses, mtu); err != nil {
+		return nil, err
+	}
 	uapi, err := buildUAPIWithMark(c.Config.PrivateKey, c.Config.ListenPort, c.Config.FirewallMark, peers)
 	if err != nil {
 		return nil, err
 	}
-	session, runtime, err := start(addresses, mtu, uapi, c.Config.Logger)
+	session, runtime, err := start(addresses, mtu, uapi, peers, c.Config.Logger)
 	if err != nil {
 		return nil, err
 	}

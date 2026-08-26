@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,38 @@ func TestGenerateKeypair(t *testing.T) {
 		if err != nil || len(decoded) != 32 {
 			t.Fatalf("%s key = %q, decoded length %d, error %v", name, value, len(decoded), err)
 		}
+	}
+}
+
+func TestValidateAddressMTU(t *testing.T) {
+	address4 := netip.MustParsePrefix("192.0.2.2/32")
+	address6 := netip.MustParsePrefix("2001:db8::2/128")
+	if err := validateAddressMTU([]netip.Prefix{address4}, 1200); err != nil {
+		t.Fatalf("IPv4 MTU rejected: %v", err)
+	}
+	if err := validateAddressMTU([]netip.Prefix{address4, address6}, 1280); err != nil {
+		t.Fatalf("minimum IPv6 MTU rejected: %v", err)
+	}
+	if err := validateAddressMTU([]netip.Prefix{address6}, 1200); err == nil {
+		t.Fatal("IPv6 MTU below 1280 accepted")
+	}
+}
+
+func TestOrderedEndpointAddresses(t *testing.T) {
+	address4 := netip.MustParseAddr("192.0.2.1")
+	address6 := netip.MustParseAddr("2001:db8::1")
+	addresses := []netip.Addr{address6, address4}
+	if got := orderedEndpointAddresses(addresses, EndpointPreferenceIPv4); len(got) != 2 || got[0] != address4 || got[1] != address6 {
+		t.Fatalf("IPv4 preference = %v", got)
+	}
+	if got := orderedEndpointAddresses(addresses, EndpointPreferenceIPv6); len(got) != 2 || got[0] != address6 || got[1] != address4 {
+		t.Fatalf("IPv6 preference = %v", got)
+	}
+	if got := orderedEndpointAddresses(addresses, EndpointPreferenceAuto); len(got) != 2 || got[0] != address6 || got[1] != address4 {
+		t.Fatalf("automatic preference = %v", got)
+	}
+	if err := validateEndpointPreference("other"); err == nil {
+		t.Fatal("invalid endpoint preference accepted")
 	}
 }
 
@@ -136,6 +169,7 @@ SaveConfig = true
 
 [Peer]
 PublicKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+EndpointPreference = ipv6
 AllowedIPs = 0.0.0.0/0, ::/0
 `
 	configuration, err := ParseConfig(strings.NewReader(input))
@@ -144,7 +178,8 @@ AllowedIPs = 0.0.0.0/0, ::/0
 	}
 	if configuration.FirewallMark != 0xca6c || configuration.Table != "1234" || !configuration.SaveConfig ||
 		len(configuration.Address) != 2 || len(configuration.DNS) != 2 || len(configuration.PreUp) != 1 ||
-		len(configuration.PostUp) != 1 || len(configuration.PreDown) != 1 || len(configuration.PostDown) != 1 {
+		len(configuration.PostUp) != 1 || len(configuration.PreDown) != 1 || len(configuration.PostDown) != 1 ||
+		len(configuration.Peers) != 1 || configuration.Peers[0].EndpointPreference != EndpointPreferenceIPv6 {
 		t.Fatalf("parsed configuration = %+v", configuration)
 	}
 }
@@ -185,6 +220,7 @@ func TestParseConfigRejectsInvalidNumbers(t *testing.T) {
 		"[Interface]\nMTU = large\n",
 		"[Interface]\nListenPort = nope\n",
 		"[Peer]\nPersistentKeepalive = often\n",
+		"[Peer]\nEndpointPreference = other\n",
 	} {
 		if _, err := ParseConfig(strings.NewReader(input)); err == nil {
 			t.Fatalf("ParseConfig(%q) succeeded", input)

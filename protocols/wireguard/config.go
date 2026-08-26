@@ -92,6 +92,12 @@ func ParseConfig(r io.Reader) (*Config, error) {
 				peer.PresharedKey = value
 			case "endpoint":
 				peer.Endpoint = value
+			case "endpointpreference":
+				preference := EndpointPreference(strings.ToLower(value))
+				if err := validateEndpointPreference(preference); err != nil {
+					return nil, fmt.Errorf("wireguard: line %d: %w", line, err)
+				}
+				peer.EndpointPreference = preference
 			case "allowedips":
 				peer.AllowedIPs = append(peer.AllowedIPs, splitList(value)...)
 			case "persistentkeepalive":

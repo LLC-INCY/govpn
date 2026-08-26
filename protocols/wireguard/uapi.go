@@ -173,32 +173,92 @@ func preparePeers(ctx context.Context, peers []Peer) ([]Peer, error) {
 	copy(prepared, peers)
 	for i := range prepared {
 		prepared[i].AllowedIPs = append([]string(nil), peers[i].AllowedIPs...)
+		if err := validateEndpointPreference(prepared[i].EndpointPreference); err != nil {
+			return nil, fmt.Errorf("wireguard: peer %d: %w", i, err)
+		}
 		if prepared[i].Endpoint == "" {
 			continue
 		}
-		endpoint, err := resolveEndpoint(ctx, prepared[i].Endpoint)
+		candidates, err := resolveEndpointCandidates(ctx, prepared[i].Endpoint, prepared[i].EndpointPreference)
 		if err != nil {
 			return nil, fmt.Errorf("wireguard: peer %d endpoint: %w", i, err)
 		}
-		prepared[i].Endpoint = endpoint
+		prepared[i].Endpoint = candidates[0]
+		prepared[i].endpointCandidates = candidates
 	}
 	return prepared, nil
 }
 
 func resolveEndpoint(ctx context.Context, endpoint string) (string, error) {
-	host, port, err := net.SplitHostPort(endpoint)
+	candidates, err := resolveEndpointCandidates(ctx, endpoint, EndpointPreferenceAuto)
 	if err != nil {
 		return "", err
 	}
+	return candidates[0], nil
+}
+
+func resolveEndpointCandidates(ctx context.Context, endpoint string, preference EndpointPreference) ([]string, error) {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return nil, err
+	}
 	if addr, err := netip.ParseAddr(host); err == nil {
-		return net.JoinHostPort(addr.String(), port), nil
+		return []string{net.JoinHostPort(addr.String(), port)}, nil
 	}
 	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
-		return "", fmt.Errorf("resolve %q: %w", host, err)
+		return nil, fmt.Errorf("resolve %q: %w", host, err)
 	}
 	if len(addresses) == 0 {
-		return "", fmt.Errorf("resolve %q: no addresses", host)
+		return nil, fmt.Errorf("resolve %q: no addresses", host)
 	}
-	return net.JoinHostPort(addresses[0].Unmap().String(), port), nil
+	ordered := orderedEndpointAddresses(addresses, preference)
+	if len(ordered) == 0 {
+		return nil, fmt.Errorf("resolve %q: no usable addresses", host)
+	}
+	candidates := make([]string, 0, len(ordered))
+	for _, address := range ordered {
+		candidates = append(candidates, net.JoinHostPort(address.String(), port))
+	}
+	return candidates, nil
+}
+
+func validateEndpointPreference(preference EndpointPreference) error {
+	switch preference {
+	case "", EndpointPreferenceAuto, EndpointPreferenceIPv4, EndpointPreferenceIPv6:
+		return nil
+	default:
+		return fmt.Errorf("invalid endpoint preference %q", preference)
+	}
+}
+
+func orderedEndpointAddresses(addresses []netip.Addr, preference EndpointPreference) []netip.Addr {
+	unique := make([]netip.Addr, 0, len(addresses))
+	seen := make(map[netip.Addr]struct{}, len(addresses))
+	for _, address := range addresses {
+		address = address.Unmap()
+		if !address.IsValid() {
+			continue
+		}
+		if _, ok := seen[address]; ok {
+			continue
+		}
+		seen[address] = struct{}{}
+		unique = append(unique, address)
+	}
+	if preference == "" || preference == EndpointPreferenceAuto {
+		return unique
+	}
+	preferred := make([]netip.Addr, 0, len(unique))
+	fallback := make([]netip.Addr, 0, len(unique))
+	for _, address := range unique {
+		matches := preference == EndpointPreferenceIPv4 && address.Is4() ||
+			preference == EndpointPreferenceIPv6 && address.Is6()
+		if matches {
+			preferred = append(preferred, address)
+		} else {
+			fallback = append(fallback, address)
+		}
+	}
+	return append(preferred, fallback...)
 }

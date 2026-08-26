@@ -12,12 +12,23 @@ import (
 
 const defaultMTU = 1420
 
+type EndpointPreference string
+
+const (
+	EndpointPreferenceAuto EndpointPreference = "auto"
+	EndpointPreferenceIPv4 EndpointPreference = "ipv4"
+	EndpointPreferenceIPv6 EndpointPreference = "ipv6"
+)
+
 type Peer struct {
-	PublicKey    string   `json:"public-key"`
-	PresharedKey string   `json:"preshared-key,omitempty"`
-	Endpoint     string   `json:"endpoint,omitempty"`
-	AllowedIPs   []string `json:"allowed-ips,omitempty"`
-	Keepalive    int      `json:"persistent-keepalive,omitempty"`
+	PublicKey          string             `json:"public-key"`
+	PresharedKey       string             `json:"preshared-key,omitempty"`
+	Endpoint           string             `json:"endpoint,omitempty"`
+	EndpointPreference EndpointPreference `json:"endpoint-preference,omitempty"`
+	AllowedIPs         []string           `json:"allowed-ips,omitempty"`
+	Keepalive          int                `json:"persistent-keepalive,omitempty"`
+
+	endpointCandidates []string
 }
 
 // PeerUpdate describes an incremental update using the official WireGuard
