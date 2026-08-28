@@ -2,7 +2,7 @@
 
 Pure-Go VPN clients and servers backed by a private gVisor network stack.
 
-- WireGuard, SSTP, OpenVPN, and native SoftEther
+- WireGuard, SSTP, OpenVPN, native SoftEther, OpenSSH TUN, and L2TP/IPsec
 - no CGO
 - no `/dev/tun` or TUN/TAP interface
 - no root privileges or host route changes
@@ -138,17 +138,89 @@ records, and `ipv6` prefers AAAA records. The default is `auto`. Before the
 first successful handshake, govpn automatically tries the next resolved
 address when the current candidate does not respond.
 
+## SSH TUN client and server
+
+The SSH client opens an OpenSSH `tun@openssh.com` point-to-point channel. Its
+local endpoint is the private gVisor stack, so it does not create a local TUN
+interface or require root privileges. It can connect either to the pure-Go
+govpn SSH server or to OpenSSH. An OpenSSH server creates a remote TUN
+interface and must allow it in `sshd_config`:
+
+```text
+PermitTunnel point-to-point
+```
+
+Use a fixed remote unit when a setup command needs a predictable interface:
+
+```go
+unit := 0
+client := sshvpn.NewClient(sshvpn.Config{
+	Server:         "vpn.example.com:22",
+	User:           "vpn",
+	PrivateKey:     privateKey,
+	KnownHostsFile: "/home/user/.ssh/known_hosts",
+	Address:        []string{"10.90.0.2/30", "fd90::2/126"},
+	RemoteTunnel:   &unit,
+	RemoteCommand:  "sudo ip addr add 10.90.0.1 peer 10.90.0.2 dev tun0 && sudo ip link set tun0 up",
+})
+session, err := client.Start(ctx)
+```
+
+The remote host must separately configure forwarding and routing or NAT for
+the traffic it should carry. IPv6 works over the same channel when the remote
+TUN has an IPv6 address and the server has an IPv6 route for the delegated
+prefix. `RemoteCommand` is optional and requires suitable remote permissions.
+
+The govpn SSH server terminates the same channel directly in its private
+gVisor stack. Neither side uses `/dev/tun`:
+
+```go
+server := sshvpn.NewServer(sshvpn.ServerConfig{
+	ListenIP:   "0.0.0.0",
+	ListenPort: 2222,
+	HostKey:    hostPrivateKey,
+	Users: map[string]sshvpn.ServerUser{
+		"alice": {Password: "secret"},
+	},
+	Address: []string{"10.90.0.1/30", "fd90::1/126"},
+})
+session, err := server.Start(ctx)
+```
+
+`ResolveTunnel` can select addresses and MTU from the authenticated user,
+public-key permissions, or requested logical TUN unit. The server is also an
+extensible SSH transport:
+
+```go
+server.RegisterChannelHandler("direct-tcpip", directTCPIPHandler)
+server.RegisterGlobalRequestHandler("tcpip-forward", forwardingHandler)
+server.RegisterSessionRequestHandler("pty-req", ptyHandler)
+server.RegisterSessionRequestHandler("shell", shellHandler)
+server.RegisterSessionRequestHandler("subsystem", sftpHandler)
+```
+
+Channel and request handlers receive the native `x/crypto/ssh` objects and own
+accept/reject or reply behavior. `ServerSession` provides per-session state so
+a PTY request can share state with a later shell or exec request.
+`Server.Serve(ctx, listener)` accepts one tunnel connection. General-purpose
+or multi-client SSH servers can accept connections themselves and call
+`Server.HandleConn`; registered shell and SFTP handlers then work with or
+without a TUN channel. The complete server example includes PTY, resize,
+signal forwarding, SFTP, concurrent connections, and userspace tunnels.
+
 ## Protocols
 
-| Package               | Implementation                                                                   |
-| --------------------- | -------------------------------------------------------------------------------- |
-| `protocols/wireguard` | Official `wireguard-go` engine, IPv4/IPv6, PSK, roaming, keepalive, runtime UAPI |
-| `protocols/sstp`      | TLS, SSTP, PPP, LCP, PAP, IPCP, crypto binding                                   |
-| `protocols/openvpn`   | UDP/TCP IPv4/IPv6, TLS, `tls-auth`, `tls-crypt`, AEAD/CBC ciphers, LZO           |
-| `protocols/softether` | Native SoftEther HTTPS/PACK login and Ethernet data channel                      |
+| Package               | Implementation                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| `protocols/wireguard` | Official `wireguard-go` engine, IPv4/IPv6, PSK, roaming, keepalive, runtime UAPI      |
+| `protocols/sstp`      | TLS, SSTP, PPP, LCP, PAP, IPCP, crypto binding                                        |
+| `protocols/openvpn`   | UDP/TCP IPv4/IPv6, TLS, `tls-auth`, `tls-crypt`, AEAD/CBC ciphers, LZO                |
+| `protocols/softether` | Native SoftEther HTTPS/PACK login and Ethernet data channel                           |
+| `protocols/ssh`       | Pure-Go SSH TUN client/server, IPv4/IPv6, extensible channel/request dispatch         |
+| `protocols/l2tp`      | IKEv1 PSK, NAT-T, ESP transport mode, L2TPv2, PPP, MS-CHAPv2, IPCP/IPv4 client/server |
 
-Each package provides `NewClient` and `NewServer`. Complete programs are under
-`examples/`:
+The VPN protocol packages provide `NewClient` and `NewServer`. Complete
+programs are under `examples/`:
 
 ```sh
 go run ./examples/wireguard/client -h
@@ -156,6 +228,10 @@ go run ./examples/wireguard/server -h
 go run ./examples/sstp/client -h
 go run ./examples/openvpn/client -h
 go run ./examples/softether/client -h
+go run ./examples/ssh/client -h
+go run ./examples/ssh/server -h
+go run ./examples/l2tp/client -h
+go run ./examples/l2tp/server -h
 ```
 
 ## Limits
@@ -166,6 +242,12 @@ go run ./examples/softether/client -h
   implemented.
 - SoftEther does not provide UDP acceleration, R-UDP bulk mode, additional TCP
   connections, half connections, or QoS.
+- Connecting the SSH client to OpenSSH requires `PermitTunnel point-to-point`
+  and remote interface/routing configuration. OpenSSH interoperability
+  currently targets Linux `IFF_TUN | IFF_NO_PI` framing. The pure-Go govpn
+  client/server path has no OS TUN dependency.
+- L2TP/IPsec supports IKEv1 Main Mode with PSK, NAT-T, AES-CBC, L2TPv2,
+  MS-CHAPv2, and IPCP/IPv4. IPv6 and IKEv2 are not implemented.
 
 Unsupported settings return an error instead of being ignored.
 

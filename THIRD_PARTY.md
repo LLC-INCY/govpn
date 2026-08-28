@@ -13,3 +13,6 @@ from the published Microsoft SSTP/PPP RFCs and official OpenVPN protocol
 documentation. SoftEther has no published RFC; its wire implementation was
 written against the behavior and data formats of the official SoftEtherVPN
 source tree. No SoftEtherVPN C source is copied into this project.
+
+The L2TP/IPsec IKEv1, ESP, L2TP, PPP, and MS-CHAPv2 client core is adapted
+from `github.com/xen0bit/veepin`, copyright (c) 2026 Remy, under the MIT License.

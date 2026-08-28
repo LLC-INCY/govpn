@@ -18,6 +18,8 @@ const (
 	ProtocolSSTP      Protocol = "sstp"
 	ProtocolOpenVPN   Protocol = "openvpn"
 	ProtocolSoftEther Protocol = "softether"
+	ProtocolSSH       Protocol = "ssh"
+	ProtocolL2TP      Protocol = "l2tp"
 )
 
 // Starter is the common lifecycle implemented by every protocol client and
