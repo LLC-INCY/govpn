@@ -6,12 +6,12 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/openvpn/internal"
 )
 
@@ -130,13 +130,11 @@ func (t *transport) run(done chan<- error) {
 		}
 	}()
 	err := <-errCh
-	if err != nil && !errors.Is(err, packet.ErrClosed) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
+	err = transportutil.NormalizeError(err)
+	if err != nil {
 		t.logf("data channel stopped: %v", err)
 	}
 	_ = t.Close()
-	if errors.Is(err, packet.ErrClosed) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
-		err = nil
-	}
 	done <- err
 }
 

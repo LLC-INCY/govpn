@@ -14,9 +14,8 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1", "outer TCP listen IP")
 	port := flag.Int("port", 4443, "outer TCP listen port")
 	hub := flag.String("hub", "DEFAULT", "virtual hub name")
-	user := flag.String("user", "alice", "SoftEther username")
+	username := flag.String("username", "alice", "SoftEther username")
 	password := flag.String("password", "change-me", "SoftEther password")
-	service := flag.String("service", "10.40.0.1:8080", "userspace TCP echo address")
 	flag.Parse()
 
 	cert, err := os.ReadFile(*certPath)
@@ -26,11 +25,9 @@ func main() {
 	ctx := exampleutil.Context()
 	session, err := softether.NewServer(softether.ServerConfig{
 		Cert: cert, Key: key, ListenIP: *listen, ListenPort: *port,
-		Hub: *hub, Pool: "10.40.0.0/24", Users: map[string]string{*user: *password},
+		Hub: *hub, Pool: exampleutil.InternalCIDR, Users: map[string]string{*username: *password},
 	}).Start(ctx)
 	exampleutil.Must(err)
 	defer session.Close()
-	listener, err := session.Listen("tcp", *service)
-	exampleutil.Must(err)
-	exampleutil.Must(exampleutil.Echo(ctx, listener))
+	exampleutil.Must(exampleutil.ServeServer(ctx, session))
 }

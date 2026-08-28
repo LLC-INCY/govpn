@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/softether/internal"
 )
 
@@ -52,7 +53,7 @@ func (s *serverTransport) Close() error {
 func (s *serverTransport) accept(config ServerConfig, localIP, assigned netip.Addr, prefixBits int, dns []netip.Addr, done chan<- error) {
 	rawConn, err := s.listener.Accept()
 	if err != nil {
-		done <- normalizeError(err)
+		done <- transportutil.NormalizeError(err)
 		return
 	}
 	s.mu.Lock()
@@ -61,7 +62,7 @@ func (s *serverTransport) accept(config ServerConfig, localIP, assigned netip.Ad
 	conn := tls.Server(rawConn, s.tlsConfig)
 	if err = conn.Handshake(); err != nil {
 		_ = s.Close()
-		done <- normalizeError(err)
+		done <- transportutil.NormalizeError(err)
 		return
 	}
 	reader := bufio.NewReader(conn)

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/openvpn/internal"
 )
 
@@ -41,7 +42,7 @@ func (s *serverStreamTransport) Close() error {
 func (s *serverStreamTransport) accept(tlsConfig *tls.Config, network netip.Prefix, gateway, assigned netip.Addr, network6 netip.Prefix, gateway6, assigned6 netip.Addr, done chan<- error) {
 	rawConn, err := s.listener.Accept()
 	if err != nil {
-		done <- normalizeError(err)
+		done <- transportutil.NormalizeError(err)
 		return
 	}
 	stream := protocol.NewStreamConn(rawConn)

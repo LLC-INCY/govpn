@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/openvpn/internal"
 )
 
@@ -42,7 +43,7 @@ func (s *serverTransport) accept(tlsConfig *tls.Config, network netip.Prefix, ga
 	buffer := make([]byte, 65535)
 	n, peer, err := s.packetConn.ReadFrom(buffer)
 	if err != nil {
-		done <- normalizeError(err)
+		done <- transportutil.NormalizeError(err)
 		return
 	}
 	peerConn := &protocol.PeerConn{PacketConn: s.packetConn, Peer: peer}

@@ -13,9 +13,8 @@ func main() {
 	keyPath := flag.String("key", "server.key", "server TLS private key PEM")
 	listen := flag.String("listen", "127.0.0.1", "outer TCP listen IP")
 	port := flag.Int("port", 4430, "outer TCP listen port")
-	user := flag.String("user", "alice", "PPP PAP username")
+	username := flag.String("username", "alice", "PPP PAP username")
 	password := flag.String("password", "change-me", "PPP PAP password")
-	service := flag.String("service", "10.20.0.1:8080", "userspace TCP echo address")
 	flag.Parse()
 
 	cert, err := os.ReadFile(*certPath)
@@ -25,11 +24,9 @@ func main() {
 	ctx := exampleutil.Context()
 	session, err := sstp.NewServer(sstp.ServerConfig{
 		Cert: cert, Key: key, ListenIP: *listen, ListenPort: *port,
-		Pool: "10.20.0.0/24", Users: map[string]string{*user: *password},
+		Pool: exampleutil.InternalCIDR, Users: map[string]string{*username: *password},
 	}).Start(ctx)
 	exampleutil.Must(err)
 	defer session.Close()
-	listener, err := session.Listen("tcp", *service)
-	exampleutil.Must(err)
-	exampleutil.Must(exampleutil.Echo(ctx, listener))
+	exampleutil.Must(exampleutil.ServeServer(ctx, session))
 }

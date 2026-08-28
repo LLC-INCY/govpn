@@ -3,13 +3,13 @@ package softether
 import (
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/softether/internal"
 )
 
@@ -134,8 +134,5 @@ func (t *transport) run(done chan<- error) {
 	}()
 	err := <-errCh
 	_ = t.Close()
-	if errors.Is(err, net.ErrClosed) || errors.Is(err, packet.ErrClosed) || errors.Is(err, io.EOF) {
-		err = nil
-	}
-	done <- err
+	done <- transportutil.NormalizeError(err)
 }

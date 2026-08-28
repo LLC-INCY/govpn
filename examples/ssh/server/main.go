@@ -17,19 +17,6 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
-type addressList []string
-
-func (addresses *addressList) String() string { return strings.Join(*addresses, ",") }
-
-func (addresses *addressList) Set(value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return errors.New("address cannot be empty")
-	}
-	*addresses = append(*addresses, value)
-	return nil
-}
-
 func main() {
 	hostKeyPath := flag.String("host-key", "./host_key", "SSH host key; generated when missing")
 	listenIP := flag.String("listen", "::", "SSH listen IP")
@@ -38,13 +25,7 @@ func main() {
 	password := flag.String("password", "passw0rd", "SSH login password")
 	shell := flag.String("shell", "/bin/sh", "shell for PTY sessions on Unix")
 	mtu := flag.Int("mtu", 1500, "userspace tunnel MTU")
-	service := flag.String("service", "10.90.0.1:8080", "TCP echo service exposed inside each tunnel; empty disables it")
-	var addresses addressList
-	flag.Var(&addresses, "address", "server tunnel prefix; repeat for IPv4 and IPv6")
 	flag.Parse()
-	if len(addresses) == 0 {
-		addresses = addressList{"10.90.0.1/30", "fd90::1/126"}
-	}
 
 	hostKey, err := loadOrCreateHostKey(*hostKeyPath)
 	exampleutil.Must(err)
@@ -54,7 +35,7 @@ func main() {
 		Users: map[string]sshvpn.ServerUser{
 			*username: {Password: *password},
 		},
-		Address:           addresses,
+		Address:           []string{exampleutil.ServerPrefix},
 		MTU:               *mtu,
 		Timeout:           15 * time.Second,
 		KeepaliveInterval: 30 * time.Second,
@@ -83,24 +64,16 @@ func main() {
 			logger.Printf("accept SSH connection: %v", acceptErr)
 			continue
 		}
-		go serveConnection(ctx, server, rawConnection, *service, logger)
+		go serveConnection(ctx, server, rawConnection, logger)
 	}
 }
 
-func serveConnection(ctx context.Context, server *sshvpn.Server, rawConnection net.Conn, serviceAddress string, logger *log.Logger) {
+func serveConnection(ctx context.Context, server *sshvpn.Server, rawConnection net.Conn, logger *log.Logger) {
 	remoteAddress := rawConnection.RemoteAddr()
 	err := server.HandleConn(ctx, rawConnection, func(tunnelCtx context.Context, connection *gossh.ServerConn, session *govpn.Session) {
 		logger.Printf("tunnel started: user=%s remote=%s addresses=%v", connection.User(), connection.RemoteAddr(), session.Addresses())
-		if serviceAddress == "" {
-			return
-		}
-		listener, listenErr := session.Listen("tcp", serviceAddress)
-		if listenErr != nil {
-			logger.Printf("listen inside tunnel: user=%s error=%v", connection.User(), listenErr)
-			return
-		}
-		if echoErr := exampleutil.Echo(tunnelCtx, listener); echoErr != nil {
-			logger.Printf("tunnel service ended: user=%s error=%v", connection.User(), echoErr)
+		if serviceErr := exampleutil.ServeServer(tunnelCtx, session); serviceErr != nil {
+			logger.Printf("tunnel services ended: user=%s error=%v", connection.User(), serviceErr)
 		}
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {

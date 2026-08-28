@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"net"
+	"strconv"
 
 	"github.com/bclswl0827/govpn/examples/internal/exampleutil"
 	"github.com/bclswl0827/govpn/protocols/wireguard"
@@ -10,24 +12,22 @@ import (
 func main() {
 	privateKey := flag.String("private-key", "", "client WireGuard private key")
 	serverPublicKey := flag.String("server-public-key", "", "server WireGuard public key")
-	endpoint := flag.String("endpoint", "127.0.0.1:51820", "server outer UDP address")
-	inner := flag.String("address", "10.10.0.2/24", "client tunnel address")
-	service := flag.String("service", "10.10.0.1:8080", "server userspace TCP service")
+	server := flag.String("server", "127.0.0.1", "WireGuard server hostname")
+	port := flag.Int("port", 51820, "WireGuard server UDP port")
+	socks5 := flag.String("socks5", exampleutil.DefaultSOCKS5, "local SOCKS5 listen address")
 	flag.Parse()
 
 	ctx := exampleutil.Context()
 	session, err := wireguard.NewClient(wireguard.Config{
 		PrivateKey: *privateKey,
-		Address:    []string{*inner},
+		Address:    []string{exampleutil.ClientPrefix},
 		Peers: []wireguard.Peer{{
 			PublicKey:  *serverPublicKey,
-			Endpoint:   *endpoint,
+			Endpoint:   net.JoinHostPort(*server, strconv.Itoa(*port)),
 			AllowedIPs: []string{"0.0.0.0/0", "::/0"},
 		}},
 	}).Start(ctx)
 	exampleutil.Must(err)
 	defer session.Close()
-	conn, err := session.DialContext(ctx, "tcp", *service)
-	exampleutil.Must(err)
-	exampleutil.Must(exampleutil.Interactive(conn))
+	exampleutil.Must(exampleutil.ServeClient(ctx, *socks5, session))
 }

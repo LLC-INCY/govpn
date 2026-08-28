@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 	"time"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	gossh "golang.org/x/crypto/ssh"
 )
 
@@ -66,7 +66,8 @@ func (t *transport) run(done chan<- error) {
 	}
 	err := <-errCh
 	_ = t.Close()
-	if errors.Is(err, context.Canceled) || errors.Is(err, packet.ErrClosed) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+	err = transportutil.NormalizeError(err)
+	if errors.Is(err, context.Canceled) {
 		err = nil
 	}
 	done <- err

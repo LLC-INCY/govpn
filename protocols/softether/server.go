@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/bclswl0827/govpn"
+	"github.com/bclswl0827/govpn/internal/netutil"
 	"github.com/bclswl0827/govpn/internal/packet"
 )
 
@@ -34,9 +35,9 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("softether: server certificate: %w", err)
 	}
-	network, gateway, assigned, err := poolAddresses(s.Config.Pool)
+	network, gateway, assigned, err := netutil.ParseIPv4Pool(s.Config.Pool)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("softether: %w", err)
 	}
 	dns, err := parseDNS(s.Config.DNS)
 	if err != nil {

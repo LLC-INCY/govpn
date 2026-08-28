@@ -80,6 +80,48 @@ func TestDomainConnectAndRelay(t *testing.T) {
 	}
 }
 
+func TestProxyDialerConnectsThroughSOCKS5(t *testing.T) {
+	echoListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer echoListener.Close()
+	go func() {
+		conn, acceptErr := echoListener.Accept()
+		if acceptErr == nil {
+			defer conn.Close()
+			_, _ = io.Copy(conn, conn)
+		}
+	}()
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = Serve(ctx, proxyListener, &net.Dialer{}, nil) }()
+	defer proxyListener.Close()
+
+	dialer := ProxyDialer{ProxyAddress: proxyListener.Addr().String(), Transport: &net.Dialer{}}
+	conn, err := dialer.DialContext(context.Background(), "tcp", echoListener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	payload := []byte("through chained SOCKS5")
+	if _, err := conn.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	received := make([]byte, len(payload))
+	if _, err := io.ReadFull(conn, received); err != nil {
+		t.Fatal(err)
+	}
+	if string(received) != string(payload) {
+		t.Fatalf("received %q, want %q", received, payload)
+	}
+}
+
 func TestRejectsUnsupportedCommand(t *testing.T) {
 	dialer := dialerFunc(func(context.Context, string, string) (net.Conn, error) {
 		t.Fatal("dialer called for unsupported command")

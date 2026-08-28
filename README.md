@@ -234,6 +234,11 @@ go run ./examples/l2tp/client -h
 go run ./examples/l2tp/server -h
 ```
 
+All client/server examples use `192.168.168.0/24`. Servers expose
+`http://192.168.168.1/`, while clients start a local SOCKS5 listener and print
+curl commands for both the internal HTTP service and WAN egress through the
+VPN server. See [`examples/README.md`](examples/README.md).
+
 ## Limits
 
 - `wg-quick` routes, DNS changes, firewall rules, and lifecycle scripts are

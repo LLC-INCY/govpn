@@ -2,7 +2,6 @@ package l2tp
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"net/netip"
 
 	"github.com/bclswl0827/govpn"
+	"github.com/bclswl0827/govpn/internal/netutil"
 	"github.com/bclswl0827/govpn/internal/packet"
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/engine"
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/logutil"
@@ -138,19 +138,16 @@ func resolveServerSettings(config ServerConfig) (serverSettings, error) {
 	if poolText == "" {
 		poolText = defaultServerPool
 	}
-	poolIP, network, err := net.ParseCIDR(poolText)
-	if err != nil || poolIP.To4() == nil {
-		return serverSettings{}, fmt.Errorf("l2tp: invalid IPv4 pool %q", poolText)
+	networkPrefix, gatewayAddress, _, err := netutil.ParseIPv4Pool(poolText)
+	if err != nil {
+		return serverSettings{}, fmt.Errorf("l2tp: %w", err)
 	}
-	prefixBits, totalBits := network.Mask.Size()
-	if totalBits != 32 || prefixBits > 30 {
-		return serverSettings{}, errors.New("l2tp: pool must contain a gateway and at least one client address")
+	prefixBits := networkPrefix.Bits()
+	network := &net.IPNet{
+		IP:   append(net.IP(nil), networkPrefix.Addr().AsSlice()...),
+		Mask: net.CIDRMask(prefixBits, 32),
 	}
-	network.IP = network.IP.To4()
-	networkValue := binary.BigEndian.Uint32(network.IP)
-	var gatewayBytes [4]byte
-	binary.BigEndian.PutUint32(gatewayBytes[:], networkValue+1)
-	gateway := net.IPv4(gatewayBytes[0], gatewayBytes[1], gatewayBytes[2], gatewayBytes[3])
+	gateway := append(net.IP(nil), gatewayAddress.AsSlice()...)
 	mtu := config.MTU
 	if mtu == 0 {
 		mtu = defaultMTU

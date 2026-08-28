@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/bclswl0827/govpn/internal/packet"
+	transportutil "github.com/bclswl0827/govpn/internal/transport"
 	protocol "github.com/bclswl0827/govpn/protocols/sstp/internal"
 )
 
@@ -40,10 +41,7 @@ func (t *serverTransport) Close() error {
 func (t *serverTransport) accept(users map[string]string, assigned netip.Addr, certificateDER []byte, done chan<- error) {
 	conn, err := t.listener.Accept()
 	if err != nil {
-		if errors.Is(err, net.ErrClosed) {
-			err = nil
-		}
-		done <- err
+		done <- transportutil.NormalizeError(err)
 		return
 	}
 	t.mu.Lock()

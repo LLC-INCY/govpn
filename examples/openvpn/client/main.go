@@ -9,12 +9,12 @@ import (
 )
 
 func main() {
-	remote := flag.String("remote", "127.0.0.1", "OpenVPN server hostname")
+	server := flag.String("server", "127.0.0.1", "OpenVPN server hostname")
 	port := flag.Int("port", 1194, "OpenVPN server UDP port")
 	caPath := flag.String("ca", "ca.crt", "server CA certificate PEM")
 	certPath := flag.String("cert", "client.crt", "client certificate PEM")
 	keyPath := flag.String("key", "client.key", "client private key PEM")
-	service := flag.String("service", "10.30.0.1:8080", "server userspace TCP service")
+	socks5 := flag.String("socks5", exampleutil.DefaultSOCKS5, "local SOCKS5 listen address")
 	flag.Parse()
 
 	ca, err := os.ReadFile(*caPath)
@@ -25,11 +25,9 @@ func main() {
 	exampleutil.Must(err)
 	ctx := exampleutil.Context()
 	session, err := openvpn.NewClient(openvpn.Config{
-		Remote: *remote, Port: *port, CA: ca, Cert: cert, Key: key,
+		Remote: *server, Port: *port, CA: ca, Cert: cert, Key: key,
 	}).Start(ctx)
 	exampleutil.Must(err)
 	defer session.Close()
-	conn, err := session.DialContext(ctx, "tcp", *service)
-	exampleutil.Must(err)
-	exampleutil.Must(exampleutil.Interactive(conn))
+	exampleutil.Must(exampleutil.ServeClient(ctx, *socks5, session))
 }

@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/bclswl0827/govpn"
+	"github.com/bclswl0827/govpn/internal/netutil"
 	"github.com/bclswl0827/govpn/internal/packet"
 )
 
@@ -31,9 +32,9 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 	if len(certificate.Certificate) == 0 {
 		return nil, errors.New("sstp: empty server certificate")
 	}
-	network, gateway, assigned, err := poolAddresses(s.Config.Pool)
+	network, gateway, assigned, err := netutil.ParseIPv4Pool(s.Config.Pool)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sstp: %w", err)
 	}
 	address := net.JoinHostPort(s.Config.ListenIP, strconv.Itoa(s.Config.ListenPort))
 	listener, err := tls.Listen("tcp", address, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}})

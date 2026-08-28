@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/bclswl0827/govpn"
+	"github.com/bclswl0827/govpn/internal/netutil"
 	"github.com/bclswl0827/govpn/internal/packet"
 )
 
@@ -32,15 +33,15 @@ func (s *Server) Start(ctx context.Context) (*govpn.Session, error) {
 	var network, network6 netip.Prefix
 	var gateway, assigned, gateway6, assigned6 netip.Addr
 	if s.Config.Pool != "" {
-		network, gateway, assigned, err = poolAddresses(s.Config.Pool)
+		network, gateway, assigned, err = netutil.ParseIPv4Pool(s.Config.Pool)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("openvpn: %w", err)
 		}
 	}
 	if s.Config.Pool6 != "" {
-		network6, gateway6, assigned6, err = poolAddresses6(s.Config.Pool6)
+		network6, gateway6, assigned6, err = netutil.ParseIPv6Pool(s.Config.Pool6)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("openvpn: %w", err)
 		}
 	}
 	listenAddress := net.JoinHostPort(s.Config.ListenIP, strconv.Itoa(s.Config.ListenPort))
