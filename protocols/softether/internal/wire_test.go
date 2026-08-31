@@ -32,6 +32,16 @@ func TestReadSignatureRequest(t *testing.T) {
 	}
 }
 
+func TestWriteSignatureRequest(t *testing.T) {
+	var wire bytes.Buffer
+	if err := WriteSignatureRequest(&wire, "vpn.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReadSignatureRequest(bufio.NewReader(&wire)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompressedFrameStream(t *testing.T) {
 	var wire bytes.Buffer
 	stream := NewFrameStream(&wire, &wire, true)

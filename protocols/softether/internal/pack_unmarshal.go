@@ -61,7 +61,11 @@ func UnmarshalPack(data []byte) (*Pack, error) {
 				return nil, fmt.Errorf("softether: decode %q: %w", name, err)
 			}
 		}
-		pack.elements[string(name)] = values
+		nameString := string(name)
+		if _, exists := pack.findName(nameString); exists {
+			return nil, fmt.Errorf("softether: duplicate PACK element %q", nameString)
+		}
+		pack.elements[nameString] = values
 	}
 	if reader.Len() != 0 {
 		return nil, errors.New("softether: trailing PACK bytes")

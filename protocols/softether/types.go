@@ -30,11 +30,13 @@ type Config struct {
 	CA                []byte
 	ServerName        string
 	SkipVerify        bool
+	OpenSSLCompat     bool
 	MaxConnections    int
 	DisableEncryption bool
 	EnableCompression bool
 	HalfConnection    bool
 	EnableQoS         bool
+	ConnectTimeout    time.Duration
 	DHCPTimeout       time.Duration
 	Logger            *log.Logger
 }

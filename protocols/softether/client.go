@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bclswl0827/govpn"
@@ -36,6 +37,12 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	if c.Config.MaxConnections < 0 || c.Config.MaxConnections > 32 {
 		return nil, errors.New("softether: MaxConnections is out of range")
 	}
+	if c.Config.ConnectTimeout < 0 {
+		return nil, errors.New("softether: ConnectTimeout cannot be negative")
+	}
+	if c.Config.OpenSSLCompat && c.Config.DisableEncryption {
+		return nil, errors.New("softether: OpenSSLCompat requires tunnel encryption")
+	}
 	if c.Config.MaxConnections > 1 || c.Config.HalfConnection || c.Config.EnableQoS {
 		return nil, errors.New("softether: additional TCP connections, half-connection, and QoS are not implemented yet")
 	}
@@ -43,29 +50,62 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	rawConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(c.Config.Server, strconv.Itoa(port)))
+	connectTimeout := c.Config.ConnectTimeout
+	if connectTimeout == 0 {
+		connectTimeout = 15 * time.Second
+	}
+	connectCtx, cancelConnect := context.WithTimeout(ctx, connectTimeout)
+	defer cancelConnect()
+	remoteAddress := net.JoinHostPort(c.Config.Server, strconv.Itoa(port))
+	c.logf("connecting: remote=%s", remoteAddress)
+	rawConn, err := (&net.Dialer{}).DialContext(connectCtx, "tcp", remoteAddress)
 	if err != nil {
 		return nil, fmt.Errorf("softether: dial: %w", err)
 	}
-	conn := tls.Client(rawConn, tlsConfig)
+	if deadline, ok := connectCtx.Deadline(); ok {
+		if err := rawConn.SetDeadline(deadline); err != nil {
+			_ = rawConn.Close()
+			return nil, fmt.Errorf("softether: set handshake deadline: %w", err)
+		}
+	}
+	c.logf("TCP connected: local=%s remote=%s", rawConn.LocalAddr(), rawConn.RemoteAddr())
+	wireConn := &tunnelWireTrace{Conn: rawConn, logf: c.logf}
+	conn := tls.Client(wireConn, tlsConfig)
 	closeOnError := true
 	defer func() {
 		if closeOnError {
 			_ = rawConn.Close()
 		}
 	}()
-	if err := conn.HandshakeContext(ctx); err != nil {
+	if err := conn.HandshakeContext(connectCtx); err != nil {
 		return nil, fmt.Errorf("softether: TLS handshake: %w", err)
 	}
+	c.logf("TLS handshake completed: version=0x%04x cipher-suite=0x%04x", conn.ConnectionState().Version, conn.ConnectionState().CipherSuite)
 	reader := bufio.NewReader(conn)
 	host := net.JoinHostPort(c.Config.Server, strconv.Itoa(port))
 	parameters, err := clientHandshake(c.Config, conn, reader, host)
 	if err != nil {
 		return nil, err
 	}
+	if err := rawConn.SetDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("softether: clear handshake deadline: %w", err)
+	}
+	c.logf("native session established: encryption=%t compression=%t", parameters.UseEncrypt, parameters.UseCompress)
+	if c.Config.OpenSSLCompat {
+		preamble := []byte{0, 1, 2, 3, 4}
+		n, err := rawConn.Write(preamble)
+		if err != nil {
+			return nil, fmt.Errorf("softether: send OpenSSL compatibility preamble: %w", err)
+		}
+		if n != len(preamble) {
+			return nil, fmt.Errorf("softether: send OpenSSL compatibility preamble: %w", io.ErrShortWrite)
+		}
+		c.logf("OpenSSL compatibility preamble sent")
+	}
+	wireConn.arm(parameters.UseEncrypt)
 	streamReader, streamWriter := io.Reader(reader), io.Writer(conn)
 	if !parameters.UseEncrypt {
-		streamReader, streamWriter = rawConn, rawConn
+		streamReader, streamWriter = wireConn, wireConn
 	}
 	stream := protocol.NewFrameStream(streamReader, streamWriter, parameters.UseCompress)
 	localMAC, err := clientMAC()
@@ -76,6 +116,7 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.logf("network parameters acquired: address=%s gateway=%s", address, gateway)
 	device, err := packet.New("softether-client", defaultMTU)
 	if err != nil {
 		return nil, err
@@ -85,6 +126,58 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	go transport.run(done)
 	closeOnError = false
 	return govpn.NewSession([]netip.Prefix{address}, defaultMTU, device, transport.Close, done)
+}
+
+func (c *Client) logf(format string, arguments ...any) {
+	if c.Config.Logger != nil {
+		c.Config.Logger.Printf("[softether] "+format, arguments...)
+	}
+}
+
+type tunnelWireTrace struct {
+	net.Conn
+	mu         sync.Mutex
+	readArmed  bool
+	writeArmed bool
+	encrypted  bool
+	logf       func(string, ...any)
+}
+
+func (c *tunnelWireTrace) arm(encrypted bool) {
+	c.mu.Lock()
+	c.readArmed = true
+	c.writeArmed = true
+	c.encrypted = encrypted
+	c.mu.Unlock()
+}
+
+func (c *tunnelWireTrace) Write(data []byte) (int, error) {
+	c.mu.Lock()
+	armed, encrypted := c.writeArmed, c.encrypted
+	if armed {
+		c.writeArmed = false
+	}
+	c.mu.Unlock()
+	if armed {
+		prefixLength := min(len(data), 16)
+		c.logf("first tunnel wire write: encryption=%t bytes=%d prefix=%x", encrypted, len(data), data[:prefixLength])
+	}
+	return c.Conn.Write(data)
+}
+
+func (c *tunnelWireTrace) Read(data []byte) (int, error) {
+	n, err := c.Conn.Read(data)
+	c.mu.Lock()
+	armed, encrypted := c.readArmed, c.encrypted
+	if armed && n != 0 {
+		c.readArmed = false
+	}
+	c.mu.Unlock()
+	if armed && n != 0 {
+		prefixLength := min(n, 16)
+		c.logf("first tunnel wire read: encryption=%t bytes=%d prefix=%x", encrypted, n, data[:prefixLength])
+	}
+	return n, err
 }
 
 func (c *Client) acquireAddress(ctx context.Context, conn net.Conn, stream *protocol.FrameStream, mac [6]byte) (netip.Prefix, netip.Addr, [6]byte, error) {

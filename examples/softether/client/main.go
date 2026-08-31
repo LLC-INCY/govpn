@@ -14,13 +14,14 @@ func main() {
 	username := flag.String("username", "alice", "SoftEther username")
 	password := flag.String("password", "change-me", "SoftEther password")
 	insecure := flag.Bool("insecure-skip-verify", false, "skip TLS certificate verification")
+	opensslCompat := flag.Bool("openssl-compat", false, "send the legacy 5-byte OpenSSL tunnel preamble")
 	socks5 := flag.String("socks5", exampleutil.DefaultSOCKS5, "local SOCKS5 listen address")
 	flag.Parse()
 
 	ctx := exampleutil.Context()
 	session, err := softether.NewClient(softether.Config{
 		Server: *server, Port: *port, Hub: *hub, Username: *username,
-		Password: *password, SkipVerify: *insecure,
+		Password: *password, SkipVerify: *insecure, OpenSSLCompat: *opensslCompat,
 	}).Start(ctx)
 	exampleutil.Must(err)
 	defer session.Close()

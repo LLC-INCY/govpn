@@ -127,7 +127,15 @@ func (t *transport) run(done chan<- error) {
 				errCh <- err
 				return
 			case <-t.endpoint.Closed():
-				errCh <- io.EOF
+				// endpoint.fail publishes the specific transport error before it
+				// closes the endpoint. Preserve that reason instead of racing the
+				// closed notification and reporting a generic EOF.
+				select {
+				case err := <-t.endpoint.Errors():
+					errCh <- err
+				default:
+					errCh <- io.EOF
+				}
 				return
 			}
 		}

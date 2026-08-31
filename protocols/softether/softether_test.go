@@ -2,10 +2,24 @@ package softether
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	protocol "github.com/bclswl0827/govpn/protocols/softether/internal"
 )
+
+func TestServerErrorMessages(t *testing.T) {
+	for code, message := range map[uint32]string{
+		3:  "connection was interrupted",
+		8:  "virtual Hub was not found",
+		9:  "authentication failed",
+		15: "too many connections",
+	} {
+		if err := serverError(code); !strings.Contains(err.Error(), message) {
+			t.Fatalf("serverError(%d) = %q", code, err)
+		}
+	}
+}
 
 func TestAuthenticateErrorCodes(t *testing.T) {
 	challenge := []byte("01234567890123456789")

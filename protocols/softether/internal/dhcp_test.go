@@ -14,6 +14,9 @@ func TestDHCPClientServerExchange(t *testing.T) {
 	const xid = 0x12345678
 
 	discover := buildDHCPClient(dhcpDiscover, xid, clientMAC, netip.Addr{}, netip.Addr{})
+	if len(discover) != 14+20+8+dhcpMinimumMessageSize {
+		t.Fatalf("DHCP discover length = %d", len(discover))
+	}
 	offerFrame, learnedIP, learnedMAC, ok := DHCPServerReply(discover, serverMAC, serverIP, assigned, 24, dns)
 	if !ok || learnedIP != assigned || learnedMAC != clientMAC {
 		t.Fatalf("DHCP discover = %v, %v, %x", ok, learnedIP, learnedMAC)

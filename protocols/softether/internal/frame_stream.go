@@ -52,8 +52,7 @@ func (s *FrameStream) WriteFrames(frames ...[]byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.w.Write(buffer.Bytes())
-	return err
+	return writeAll(s.w, buffer.Bytes())
 }
 
 func (s *FrameStream) WriteKeepAlive() error {
@@ -68,8 +67,21 @@ func (s *FrameStream) WriteKeepAlive() error {
 	buffer.Write(payload)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.w.Write(buffer.Bytes())
-	return err
+	return writeAll(s.w, buffer.Bytes())
+}
+
+func writeAll(w io.Writer, data []byte) error {
+	for len(data) != 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }
 
 func (s *FrameStream) ReadFrames() ([][]byte, error) {

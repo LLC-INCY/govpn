@@ -1,6 +1,7 @@
 package openvpn
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -63,6 +64,10 @@ func (e *endpoint) readLoop() {
 			}
 			if opcode != Ack {
 				_ = e.sendAck(packet.PacketID)
+			}
+			if opcode == ControlHardResetClientV2 || opcode == ControlHardResetServerV2 {
+				e.fail(errors.New("openvpn: data channel rekey requested; reconnect required"))
+				return
 			}
 			for _, acknowledgment := range packet.Acknowledgments {
 				e.pendingMu.Lock()

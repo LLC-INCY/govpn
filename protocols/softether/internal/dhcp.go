@@ -14,6 +14,8 @@ const (
 	dhcpRequest  = 3
 	dhcpACK      = 5
 	dhcpNAK      = 6
+
+	dhcpMinimumMessageSize = 300
 )
 
 var dhcpCookie = [4]byte{99, 130, 83, 99}
@@ -172,7 +174,7 @@ func buildDHCPServer(messageType byte, xid uint32, clientMAC, serverMAC [6]byte,
 }
 
 func wrapDHCP(bootp, options []byte, sourceMAC, destinationMAC [6]byte, sourceIP, destinationIP netip.Addr, sourcePort, destinationPort uint16) []byte {
-	payloadLength := len(bootp) + len(options)
+	payloadLength := max(len(bootp)+len(options), dhcpMinimumMessageSize)
 	frame := make([]byte, 14+20+8+payloadLength)
 	copy(frame[0:6], destinationMAC[:])
 	copy(frame[6:12], sourceMAC[:])

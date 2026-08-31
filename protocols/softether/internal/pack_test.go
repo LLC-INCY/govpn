@@ -36,3 +36,16 @@ func TestPackRejectsTrailingData(t *testing.T) {
 		t.Fatal("trailing data accepted")
 	}
 }
+
+func TestPackElementNamesAreCaseInsensitive(t *testing.T) {
+	pack := NewPack()
+	pack.AddString("hubname", "VPNGATE")
+	pack.AddString("HubName", "replaced")
+
+	if len(pack.elements) != 1 {
+		t.Fatalf("element count = %d, want 1", len(pack.elements))
+	}
+	if value := pack.GetString("HUBNAME"); value != "VPNGATE" {
+		t.Fatalf("hubname = %q, want VPNGATE", value)
+	}
+}
