@@ -6,14 +6,9 @@ import (
 	"testing"
 )
 
-func TestParseConfigFileInline(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "client.ovpn")
+func TestParseConfigInline(t *testing.T) {
 	content := "client\nproto udp\nremote vpn.example 443\ndata-ciphers AES-128-GCM:AES-256-GCM\n<ca>\nCA\n</ca>\n<cert>\nCERT\n</cert>\n<key>\nKEY\n</key>\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := ParseConfigFile(path)
+	config, err := ParseConfig([]byte(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,18 +17,14 @@ func TestParseConfigFileInline(t *testing.T) {
 	}
 }
 
-func TestParseConfigFileAuthAndLegacyOptions(t *testing.T) {
+func TestParseConfigAuthAndLegacyOptions(t *testing.T) {
 	directory := t.TempDir()
 	credentialsPath := filepath.Join(directory, "auth.txt")
 	if err := os.WriteFile(credentialsPath, []byte("alice\r\nsecret\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(directory, "client.ovpn")
-	content := "client\nproto udp4\nremote vpn.example 1194\ncipher BF-CBC\nauth-user-pass auth.txt\ncomp-lzo\ntun-mtu 1300\nscript-security 2\n<ca>\nCA\n</ca>\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := ParseConfigFile(path)
+	content := "client\nproto udp4\nremote vpn.example 1194\ncipher BF-CBC\nauth-user-pass " + credentialsPath + "\ncomp-lzo\ntun-mtu 1300\nscript-security 2\n<ca>\nCA\n</ca>\n"
+	config, err := ParseConfig([]byte(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,22 +36,15 @@ func TestParseConfigFileAuthAndLegacyOptions(t *testing.T) {
 	}
 }
 
-func TestParseConfigFileRejectsInteractiveAuth(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client.ovpn")
-	if err := os.WriteFile(path, []byte("remote vpn.example\nauth-user-pass\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ParseConfigFile(path); err == nil {
-		t.Fatal("ParseConfigFile accepted interactive auth-user-pass")
+func TestParseConfigRejectsInteractiveAuth(t *testing.T) {
+	if _, err := ParseConfig([]byte("remote vpn.example\nauth-user-pass\n")); err == nil {
+		t.Fatal("ParseConfig accepted interactive auth-user-pass")
 	}
 }
 
-func TestParseConfigFileAcceptsTCPAndAES128CBC(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "client.ovpn")
-	if err := os.WriteFile(path, []byte("remote vpn.example\nproto tcp-client\ndata-ciphers AES-128-CBC\nauth SHA1\n<ca>\nCA\n</ca>\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config, err := ParseConfigFile(path)
+func TestParseConfigAcceptsTCPAndAES128CBC(t *testing.T) {
+	value := []byte("remote vpn.example\nproto tcp-client\ndata-ciphers AES-128-CBC\nauth SHA1\n<ca>\nCA\n</ca>\n")
+	config, err := ParseConfig(value)
 	if err != nil {
 		t.Fatal(err)
 	}

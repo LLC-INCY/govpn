@@ -2,25 +2,20 @@ package openvpn
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-// ParseConfigFile reads the client-side subset used by this implementation.
-// It supports path-based and inline ca/cert/key directives. Relative paths,
-// including auth-user-pass files, are resolved from the configuration file.
-func ParseConfigFile(path string) (*Config, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+// ParseConfig parses the client-side subset used by this implementation. It
+// supports path-based and inline ca/cert/key directives. Relative paths are
+// resolved from the current working directory.
+func ParseConfig(value []byte) (*Config, error) {
+	var err error
 	config := &Config{}
-	directory := filepath.Dir(path)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(value))
 	for line := 1; scanner.Scan(); line++ {
 		text := strings.TrimSpace(scanner.Text())
 		if text == "" || strings.HasPrefix(text, "#") || strings.HasPrefix(text, ";") {
@@ -88,7 +83,7 @@ func ParseConfigFile(path string) (*Config, error) {
 			if fields[0] == "tls-auth" && len(fields) > 3 {
 				return nil, fmt.Errorf("openvpn: line %d: invalid tls-auth", line)
 			}
-			value, readErr := os.ReadFile(resolvePath(directory, fields[1]))
+			value, readErr := os.ReadFile(resolvePath("", fields[1]))
 			if readErr != nil {
 				return nil, fmt.Errorf("openvpn: line %d: %w", line, readErr)
 			}
@@ -167,7 +162,7 @@ func ParseConfigFile(path string) (*Config, error) {
 			if len(fields) != 2 {
 				return nil, fmt.Errorf("openvpn: line %d: auth-user-pass requires a credentials file", line)
 			}
-			username, password, readErr := readCredentials(resolvePath(directory, fields[1]))
+			username, password, readErr := readCredentials(resolvePath("", fields[1]))
 			if readErr != nil {
 				return nil, fmt.Errorf("openvpn: line %d: auth-user-pass: %w", line, readErr)
 			}
