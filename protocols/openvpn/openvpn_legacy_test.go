@@ -1,11 +1,24 @@
 package openvpn
 
 import (
+	"bufio"
 	"bytes"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadPushReplySkipsInformationalCommands(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader("INFO_PRE,initializing\x00INFO,ready\x00PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0\x00"))
+	reply, err := readPushReply(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply != "PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0" {
+		t.Fatalf("PUSH_REPLY = %q", reply)
+	}
+}
 
 func TestCompressionFraming(t *testing.T) {
 	payload := []byte{0x45, 0, 0, 20}
@@ -70,6 +83,19 @@ func TestParsePushOptionsKeepalive(t *testing.T) {
 	if options.pingInterval != 10*time.Second || options.pingTimeout != time.Minute {
 		t.Fatalf("keepalive = ping %s, timeout %s", options.pingInterval, options.pingTimeout)
 	}
+	if options.cipher != "" {
+		t.Fatalf("unpushed cipher = %q", options.cipher)
+	}
+}
+
+func TestEffectiveCipherKeepsLegacyCipherDuringNCP(t *testing.T) {
+	config := Config{
+		Cipher:      "AES-128-CBC",
+		DataCiphers: []string{"AES-256-GCM", "AES-128-GCM", "AES-128-CBC"},
+	}
+	if cipher := effectiveCipher(config); cipher != "AES-128-CBC" {
+		t.Fatalf("effective cipher = %q", cipher)
+	}
 }
 
 func TestParsePushOptionsIPv6(t *testing.T) {
@@ -79,5 +105,15 @@ func TestParsePushOptionsIPv6(t *testing.T) {
 	}
 	if options.address.IsValid() || options.address6 != netip.MustParseAddr("2001:db8:1::2") || options.prefixBits6 != 64 {
 		t.Fatalf("IPv6 tunnel address = %s/%d", options.address6, options.prefixBits6)
+	}
+}
+
+func TestParsePushOptionsModernProtocol(t *testing.T) {
+	options, err := parsePushOptions("PUSH_REPLY,ifconfig 10.102.1.22 10.102.1.21,peer-id 55,cipher AES-256-GCM,protocol-flags cc-exit tls-ekm dyn-tls-crypt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.usePeerID || options.peerID != 55 || !options.tlsEKM {
+		t.Fatalf("modern push options = %+v", options)
 	}
 }

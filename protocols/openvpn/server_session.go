@@ -74,5 +74,5 @@ func establishServerSession(conn net.Conn, firstDatagram []byte, device *packet.
 		return nil, err
 	}
 	closeOnError = false
-	return newTransport(endpoint, device, sendCipher, receiveCipher, config.Compression, 0, 0, config.Logger), nil
+	return newTransport(endpoint, device, sendCipher, receiveCipher, false, 0, config.Compression, 0, 0, config.Logger), nil
 }

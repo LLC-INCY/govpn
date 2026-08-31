@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -116,15 +117,20 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = endpoint.Close()
 		return nil, err
 	}
-	pushReply, err := protocol.ReadCommand(reader, 16384)
+	pushReply, err := readPushReply(reader)
 	if err != nil {
 		_ = endpoint.Close()
-		return nil, fmt.Errorf("openvpn: PUSH_REPLY: %w", err)
+		return nil, err
 	}
 	pushed, err := parsePushOptions(pushReply)
 	if err != nil {
 		_ = endpoint.Close()
 		return nil, err
+	}
+	if pushed.cipher == "" {
+		// A non-NCP server does not push a cipher. In that case OpenVPN
+		// continues using the legacy cipher from the key-method options.
+		pushed.cipher = effectiveCipher(config)
 	}
 	allowedCipher := false
 	for _, name := range effectiveClientDataCiphers(config) {
@@ -134,8 +140,19 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = endpoint.Close()
 		return nil, fmt.Errorf("openvpn: server selected cipher %s outside data-ciphers", pushed.cipher)
 	}
-	c.logf("tunnel parameters received: address=%s/%d address6=%s/%d cipher=%s ping=%s receive-timeout=%s", pushed.address, pushed.prefixBits, pushed.address6, pushed.prefixBits6, pushed.cipher, pushed.pingInterval, pushed.pingTimeout)
-	keys := protocol.DeriveKeys(clientSource, serverMessage.Source, endpoint.LocalSessionID(), endpoint.RemoteSessionID())
+	keyDerivation := "openvpn-prf"
+	var keys protocol.DataKeys
+	if pushed.tlsEKM {
+		keyDerivation = "tls-ekm"
+		keys, err = protocol.ExportDataKeys(&tlsState)
+	} else {
+		keys = protocol.DeriveKeys(clientSource, serverMessage.Source, endpoint.LocalSessionID(), endpoint.RemoteSessionID())
+	}
+	if err != nil {
+		_ = endpoint.Close()
+		return nil, err
+	}
+	c.logf("tunnel parameters received: address=%s/%d address6=%s/%d cipher=%s peer-id=%d data-v2=%t key-derivation=%s ping=%s receive-timeout=%s", pushed.address, pushed.prefixBits, pushed.address6, pushed.prefixBits6, pushed.cipher, pushed.peerID, pushed.usePeerID, keyDerivation, pushed.pingInterval, pushed.pingTimeout)
 	sendCipher, err := newDataCipher(pushed.cipher, effectiveAuth(config), keys.Client)
 	if err != nil {
 		_ = endpoint.Close()
@@ -155,7 +172,7 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = endpoint.Close()
 		return nil, err
 	}
-	transport := newTransport(endpoint, device, sendCipher, receiveCipher, config.Compression, pushed.pingInterval, pushed.pingTimeout, config.Logger)
+	transport := newTransport(endpoint, device, sendCipher, receiveCipher, pushed.usePeerID, pushed.peerID, config.Compression, pushed.pingInterval, pushed.pingTimeout, config.Logger)
 	done := make(chan error, 1)
 	go transport.run(done)
 	addresses := make([]netip.Prefix, 0, 2)
@@ -171,6 +188,33 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	}
 	c.logf("data channel ready")
 	return session, nil
+}
+
+func readPushReply(reader *bufio.Reader) (string, error) {
+	const maxControlMessages = 64
+	for range maxControlMessages {
+		command, err := protocol.ReadCommand(reader, 16384)
+		if err != nil {
+			return "", fmt.Errorf("openvpn: read PUSH_REPLY: %w", err)
+		}
+		switch {
+		case command == "PUSH_REPLY" || strings.HasPrefix(command, "PUSH_REPLY,"):
+			return command, nil
+		case command == "INFO" || strings.HasPrefix(command, "INFO,"),
+			command == "INFO_PRE" || strings.HasPrefix(command, "INFO_PRE,"),
+			command == "ECHO" || strings.HasPrefix(command, "ECHO,"),
+			command == "AUTH_PENDING" || strings.HasPrefix(command, "AUTH_PENDING,"):
+			continue
+		case command == "AUTH_FAILED" || strings.HasPrefix(command, "AUTH_FAILED,"):
+			return "", fmt.Errorf("openvpn: authentication failed: %s", command)
+		case command == "RESTART" || strings.HasPrefix(command, "RESTART,"),
+			command == "HALT" || strings.HasPrefix(command, "HALT,"):
+			return "", fmt.Errorf("openvpn: server rejected the session: %s", command)
+		default:
+			return "", fmt.Errorf("openvpn: unexpected control command while waiting for PUSH_REPLY: %q", command)
+		}
+	}
+	return "", errors.New("openvpn: too many control messages while waiting for PUSH_REPLY")
 }
 
 func clientRemotes(config Config) []Remote {

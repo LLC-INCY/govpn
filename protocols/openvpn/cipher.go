@@ -69,10 +69,17 @@ func effectiveClientDataCiphers(config Config) []string {
 	if len(config.DataCiphers) != 0 {
 		return append([]string(nil), config.DataCiphers...)
 	}
-	if config.Cipher != "" {
-		return []string{normalizeCipherName(config.Cipher)}
+	result := append([]string(nil), defaultDataCiphers...)
+	legacyCipher := normalizeCipherName(config.Cipher)
+	if legacyCipher == "" {
+		return result
 	}
-	return append([]string(nil), defaultDataCiphers...)
+	for _, name := range result {
+		if name == legacyCipher {
+			return result
+		}
+	}
+	return append(result, legacyCipher)
 }
 
 func effectiveServerDataCiphers(config ServerConfig) []string {

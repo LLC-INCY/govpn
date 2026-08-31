@@ -40,6 +40,7 @@ type Config struct {
 	Compression        string
 	MTU                int
 	Shape              int
+	IgnoredDirectives  []string
 	Logger             *log.Logger
 }
 

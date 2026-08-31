@@ -103,3 +103,35 @@ func TestAEADDataCiphers(t *testing.T) {
 		})
 	}
 }
+
+func TestAEADHeaderAuthenticationMatchesOpenVPNPacketVersion(t *testing.T) {
+	var key KeyPair
+	for _, test := range []struct {
+		name          string
+		opcode        byte
+		peerID        uint32
+		headerChanged bool
+	}{
+		{name: "data-v1", opcode: DataV1},
+		{name: "data-v2", opcode: DataV2, peerID: 7, headerChanged: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sender, err := NewDataCipher(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, _ := DataHeader(test.opcode, 0, test.peerID)
+			packet, err := sender.Seal(header, []byte("packet"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			receiver, _ := NewDataCipher(key)
+			changed := append([]byte(nil), header...)
+			changed[len(changed)-1] ^= 1
+			_, err = receiver.Open(changed, packet[len(header):])
+			if (err != nil) != test.headerChanged {
+				t.Fatalf("changed header error = %v", err)
+			}
+		})
+	}
+}

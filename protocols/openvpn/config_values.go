@@ -1,44 +1,9 @@
 package openvpn
 
 import (
-	"bufio"
-	"bytes"
-	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
-
-func readCredentials(path string) (string, string, error) {
-	value, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", err
-	}
-	return parseCredentials(value)
-}
-
-func parseCredentials(value []byte) (string, string, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(value))
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", "", err
-		}
-		return "", "", errors.New("credentials file is empty")
-	}
-	username := strings.TrimSuffix(scanner.Text(), "\r")
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", "", err
-		}
-		return "", "", errors.New("credentials file has no password line")
-	}
-	password := strings.TrimSuffix(scanner.Text(), "\r")
-	if err := scanner.Err(); err != nil {
-		return "", "", err
-	}
-	return username, password, nil
-}
 
 func setInline(config *Config, name string, value []byte) error {
 	switch name {
@@ -53,15 +18,22 @@ func setInline(config *Config, name string, value []byte) error {
 	case "tls-crypt":
 		config.TLSCrypt = append([]byte(nil), value...)
 	case "auth-user-pass":
-		username, password, err := parseCredentials(value)
-		if err != nil {
-			return err
-		}
-		config.Username, config.Password = username, password
+		// Credentials are supplied by the caller through Config.
+		addIgnoredDirective(config, name)
 	default:
-		return fmt.Errorf("unsupported inline block <%s>", name)
+		addIgnoredDirective(config, name)
 	}
 	return nil
+}
+
+func addIgnoredDirective(config *Config, name string) {
+	name = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(name)), "--")
+	for _, existing := range config.IgnoredDirectives {
+		if existing == name {
+			return
+		}
+	}
+	config.IgnoredDirectives = append(config.IgnoredDirectives, name)
 }
 
 func resolvePath(directory, value string) string {

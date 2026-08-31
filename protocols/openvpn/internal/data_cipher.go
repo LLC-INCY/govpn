@@ -59,6 +59,9 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 }
 
 func (c *DataCipher) Seal(header, plaintext []byte) ([]byte, error) {
+	if len(header) != 1 && len(header) != 4 {
+		return nil, errors.New("openvpn: invalid AEAD data header")
+	}
 	if c.nextID == 0 {
 		return nil, errors.New("openvpn: data packet ID exhausted")
 	}
@@ -68,15 +71,19 @@ func (c *DataCipher) Seal(header, plaintext []byte) ([]byte, error) {
 	nonce := make([]byte, 12)
 	copy(nonce, packetID)
 	copy(nonce[4:], c.implicit[:])
-	additional := append(append([]byte(nil), header...), packetID...)
+	additional := aeadAdditionalData(header, packetID)
 	sealed := c.aead.Seal(nil, nonce, plaintext, additional)
 	tagAtEnd := len(sealed) - c.aead.Overhead()
-	result := append(additional, sealed[tagAtEnd:]...)
+	result := append(append([]byte(nil), header...), packetID...)
+	result = append(result, sealed[tagAtEnd:]...)
 	result = append(result, sealed[:tagAtEnd]...)
 	return result, nil
 }
 
 func (c *DataCipher) Open(header, payload []byte) ([]byte, error) {
+	if len(header) != 1 && len(header) != 4 {
+		return nil, errors.New("openvpn: invalid AEAD data header")
+	}
 	if len(payload) < 4+c.aead.Overhead() {
 		return nil, errors.New("openvpn: truncated AEAD packet")
 	}
@@ -87,7 +94,7 @@ func (c *DataCipher) Open(header, payload []byte) ([]byte, error) {
 	nonce := make([]byte, 12)
 	copy(nonce, payload[:4])
 	copy(nonce[4:], c.implicit[:])
-	additional := append(append([]byte(nil), header...), payload[:4]...)
+	additional := aeadAdditionalData(header, payload[:4])
 	tag := payload[4 : 4+c.aead.Overhead()]
 	ciphertext := payload[4+c.aead.Overhead():]
 	sealed := append(append([]byte(nil), ciphertext...), tag...)
@@ -97,6 +104,16 @@ func (c *DataCipher) Open(header, payload []byte) ([]byte, error) {
 	}
 	c.markReceived(packetID)
 	return plaintext, nil
+}
+
+func aeadAdditionalData(header, packetID []byte) []byte {
+	// OpenVPN authenticates the opcode and peer-id for P_DATA_V2. The
+	// P_DATA_V1 opcode remains outside the AEAD additional data.
+	additional := make([]byte, 0, len(header)+len(packetID))
+	if len(header) == 4 {
+		additional = append(additional, header...)
+	}
+	return append(additional, packetID...)
 }
 
 func (c *DataCipher) isReplay(packetID uint32) bool {

@@ -26,6 +26,8 @@ type transport struct {
 	device       *packet.Device
 	send         dataCipher
 	receive      dataCipher
+	usePeerID    bool
+	peerID       uint32
 	compression  string
 	pingInterval time.Duration
 	pingTimeout  time.Duration
@@ -44,10 +46,11 @@ func newTransport(endpoint interface {
 	Errors() <-chan error
 	Closed() <-chan struct{}
 	Close() error
-}, device *packet.Device, send, receive dataCipher, compression string, pingInterval, pingTimeout time.Duration, logger *log.Logger) *transport {
+}, device *packet.Device, send, receive dataCipher, usePeerID bool, peerID uint32, compression string, pingInterval, pingTimeout time.Duration, logger *log.Logger) *transport {
 	return &transport{
 		endpoint: endpoint, device: device, send: send, receive: receive,
-		compression: compression, pingInterval: pingInterval, pingTimeout: pingTimeout,
+		usePeerID: usePeerID, peerID: peerID, compression: compression,
+		pingInterval: pingInterval, pingTimeout: pingTimeout,
 		logger: logger, sendActivity: make(chan struct{}, 1),
 	}
 }
@@ -147,7 +150,11 @@ func (t *transport) sendPacket(payload []byte) error {
 	if err != nil {
 		return err
 	}
-	header, err := protocol.DataHeader(protocol.DataV1, 0, 0)
+	opcode := byte(protocol.DataV1)
+	if t.usePeerID {
+		opcode = protocol.DataV2
+	}
+	header, err := protocol.DataHeader(opcode, 0, t.peerID)
 	if err != nil {
 		return err
 	}

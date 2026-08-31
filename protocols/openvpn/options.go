@@ -16,10 +16,7 @@ import (
 func clientOptions(config Config) string {
 	cipherName := effectiveCipher(config)
 	auth := effectiveAuth(config)
-	keySize := 256
-	if strings.HasSuffix(strings.ToUpper(cipherName), "-CBC") {
-		keySize = 128
-	}
+	keySize := cipherKeySize(cipherName)
 	mtu := config.MTU
 	if mtu == 0 {
 		mtu = defaultMTU
@@ -32,11 +29,11 @@ func clientOptions(config Config) string {
 }
 
 func effectiveCipher(config Config) string {
-	if len(config.DataCiphers) != 0 {
-		return config.DataCiphers[0]
-	}
 	if config.Cipher != "" {
 		return normalizeCipherName(config.Cipher)
+	}
+	if len(config.DataCiphers) != 0 {
+		return config.DataCiphers[0]
 	}
 	return "AES-256-GCM"
 }
@@ -66,7 +63,11 @@ func effectiveMTU(mtu int) int {
 }
 
 func clientPeerInfo(config Config) string {
-	peerInfo := "IV_VER=2.6.0\nIV_PROTO=990\nIV_NCP=2\nIV_CIPHERS=" + strings.Join(effectiveClientDataCiphers(config), ":") + "\n"
+	// Advertise only capabilities implemented by this client. In particular,
+	// advertising dynamic tls-crypt makes servers select a rekey mode that the
+	// control channel cannot currently process.
+	const ivProto = 1<<1 | 1<<3 // P_DATA_V2 and TLS key material export.
+	peerInfo := fmt.Sprintf("IV_VER=2.6.0\nIV_PROTO=%d\nIV_NCP=2\nIV_CIPHERS=%s\n", ivProto, strings.Join(effectiveClientDataCiphers(config), ":"))
 	if strings.EqualFold(config.Compression, "lzo") {
 		peerInfo += "IV_LZO=1\n"
 	}
@@ -180,6 +181,9 @@ type pushedOptions struct {
 	address6     netip.Addr
 	prefixBits6  int
 	cipher       string
+	peerID       uint32
+	usePeerID    bool
+	tlsEKM       bool
 	pingInterval time.Duration
 	pingTimeout  time.Duration
 }
@@ -246,12 +250,25 @@ func parsePushOptions(reply string) (pushedOptions, error) {
 			}
 			result.cipher = normalizeCipherName(fields[1])
 		}
+		if len(fields) == 2 && fields[0] == "peer-id" {
+			peerID, err := strconv.ParseUint(fields[1], 10, 24)
+			if err != nil {
+				return pushedOptions{}, errors.New("openvpn: invalid PUSH_REPLY peer-id value")
+			}
+			result.peerID = uint32(peerID)
+			result.usePeerID = true
+		}
+		if len(fields) >= 2 && fields[0] == "protocol-flags" {
+			for _, flag := range fields[1:] {
+				result.tlsEKM = result.tlsEKM || flag == "tls-ekm"
+			}
+		}
+		if len(fields) == 2 && fields[0] == "key-derivation" {
+			result.tlsEKM = result.tlsEKM || fields[1] == "tls-ekm"
+		}
 	}
 	if !hasAddress {
 		return pushedOptions{}, errors.New("openvpn: PUSH_REPLY has no valid tunnel address")
-	}
-	if result.cipher == "" {
-		result.cipher = "AES-256-GCM"
 	}
 	return result, nil
 }

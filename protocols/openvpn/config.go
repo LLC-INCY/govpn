@@ -11,7 +11,8 @@ import (
 
 // ParseConfig parses the client-side subset used by this implementation. It
 // supports path-based and inline ca/cert/key directives. Relative paths are
-// resolved from the current working directory.
+// resolved from the current working directory. Unsupported directives are
+// retained in Config.IgnoredDirectives instead of causing a parse failure.
 func ParseConfig(value []byte) (*Config, error) {
 	var err error
 	config := &Config{}
@@ -46,6 +47,7 @@ func ParseConfig(value []byte) (*Config, error) {
 		if len(fields) == 0 {
 			continue
 		}
+		fields[0] = strings.TrimPrefix(strings.ToLower(fields[0]), "--")
 		switch fields[0] {
 		case "remote":
 			if len(fields) < 2 || len(fields) > 4 {
@@ -159,14 +161,9 @@ func ParseConfig(value []byte) (*Config, error) {
 				config.TLSVersionMax = version
 			}
 		case "auth-user-pass":
-			if len(fields) != 2 {
-				return nil, fmt.Errorf("openvpn: line %d: auth-user-pass requires a credentials file", line)
-			}
-			username, password, readErr := readCredentials(resolvePath("", fields[1]))
-			if readErr != nil {
-				return nil, fmt.Errorf("openvpn: line %d: auth-user-pass: %w", line, readErr)
-			}
-			config.Username, config.Password = username, password
+			// Credentials are supplied by the caller through Config. Ignore this
+			// directive so parsing never reads credentials from the filesystem.
+			addIgnoredDirective(config, fields[0])
 		case "comp-lzo":
 			if len(fields) > 2 {
 				return nil, fmt.Errorf("openvpn: line %d: invalid comp-lzo", line)
@@ -208,11 +205,12 @@ func ParseConfig(value []byte) (*Config, error) {
 				return nil, fmt.Errorf("openvpn: line %d: invalid key-direction", line)
 			}
 			config.KeyDirectionSet = true
-		case "client", "dev", "dev-type", "nobind", "persist-key", "persist-tun", "verb", "mute-replay-warnings", "auth-nocache", "pull", "resolv-retry", "script-security":
+		case "client", "dev", "dev-type", "nobind", "persist-key", "persist-tun", "verb", "mute-replay-warnings", "auth-nocache", "pull", "resolv-retry", "script-security", "dhcp-option":
 			// These directives affect host integration, logging, or retry policy;
 			// they do not change this library's in-memory protocol engine.
+			addIgnoredDirective(config, fields[0])
 		default:
-			return nil, fmt.Errorf("openvpn: line %d: unsupported directive %q", line, fields[0])
+			addIgnoredDirective(config, fields[0])
 		}
 	}
 	if err := scanner.Err(); err != nil {

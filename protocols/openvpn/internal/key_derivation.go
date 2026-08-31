@@ -5,9 +5,13 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/tls"
+	"fmt"
 	"hash"
 	"io"
 )
+
+const exportedDataKeyLabel = "EXPORTER-OpenVPN-datakeys"
 
 const keyMaterialSize = 64
 
@@ -25,6 +29,20 @@ type KeyPair struct {
 type DataKeys struct {
 	Client KeyPair
 	Server KeyPair
+}
+
+func ExportDataKeys(state *tls.ConnectionState) (DataKeys, error) {
+	material, err := state.ExportKeyingMaterial(exportedDataKeyLabel, nil, 4*keyMaterialSize)
+	if err != nil {
+		return DataKeys{}, fmt.Errorf("openvpn: export TLS data keys: %w", err)
+	}
+	var keys DataKeys
+	offset := 0
+	for _, target := range [][]byte{keys.Client.Cipher[:], keys.Client.HMAC[:], keys.Server.Cipher[:], keys.Server.HMAC[:]} {
+		copy(target, material[offset:offset+len(target)])
+		offset += len(target)
+	}
+	return keys, nil
 }
 
 func NewClientKeySource() (KeySource, error) {
