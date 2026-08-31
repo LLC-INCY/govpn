@@ -213,7 +213,7 @@ signal forwarding, SFTP, concurrent connections, and userspace tunnels.
 | Package               | Implementation                                                                        |
 | --------------------- | ------------------------------------------------------------------------------------- |
 | `protocols/wireguard` | Official `wireguard-go` engine, IPv4/IPv6, PSK, roaming, keepalive, runtime UAPI      |
-| `protocols/sstp`      | TLS, SSTP, PPP, LCP, PAP, IPCP, crypto binding                                        |
+| `protocols/sstp`      | TLS, SSTP, PPP, LCP, PAP, MS-CHAPv2, IPCP, crypto binding                                        |
 | `protocols/openvpn`   | UDP/TCP IPv4/IPv6, TLS, `tls-auth`, `tls-crypt`, AEAD/CBC ciphers, LZO                |
 | `protocols/softether` | Native SoftEther HTTPS/PACK login and Ethernet data channel                           |
 | `protocols/ssh`       | Pure-Go SSH TUN client/server, IPv4/IPv6, extensible channel/request dispatch         |
@@ -243,8 +243,8 @@ VPN server. See [`examples/README.md`](examples/README.md).
 
 - `wg-quick` routes, DNS changes, firewall rules, and lifecycle scripts are
   parsed but not applied to the host.
-- SSTP supports PAP authentication; MS-CHAPv2, EAP, and IPv6CP are not yet
-  implemented.
+- SSTP supports PAP and MS-CHAPv2 authentication (with RFC 3079 MPPE key
+  derivation for the crypto binding); EAP and IPv6CP are not yet implemented.
 - SoftEther does not provide UDP acceleration, R-UDP bulk mode, additional TCP
   connections, half connections, or QoS.
 - Connecting the SSH client to OpenSSH requires `PermitTunnel point-to-point`

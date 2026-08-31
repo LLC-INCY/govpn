@@ -9,7 +9,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/bclswl0827/govpn/protocols/l2tp/internal/mschap"
+	"github.com/bclswl0827/govpn/internal/mschap"
 )
 
 // ErrAuth reports an MS-CHAPv2 exchange the peer refused: a CHAP Failure, or a

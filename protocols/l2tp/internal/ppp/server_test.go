@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bclswl0827/govpn/protocols/l2tp/internal/mschap"
+	"github.com/bclswl0827/govpn/internal/mschap"
 )
 
 type transportFunc func([]byte) error

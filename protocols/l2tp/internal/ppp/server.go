@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/bclswl0827/govpn/protocols/l2tp/internal/mschap"
+	"github.com/bclswl0827/govpn/internal/mschap"
 )
 
 // Authenticator returns the password for a username, or ok=false when the user

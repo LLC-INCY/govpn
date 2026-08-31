@@ -10,7 +10,7 @@ import (
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/esp"
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/ikev1"
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/logutil"
-	"github.com/bclswl0827/govpn/protocols/l2tp/internal/mschap"
+	"github.com/bclswl0827/govpn/internal/mschap"
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/ppp"
 )
 

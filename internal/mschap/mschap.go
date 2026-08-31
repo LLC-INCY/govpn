@@ -15,6 +15,7 @@
 package mschap
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/des"  //nolint:gosec // DES is required by the MS-CHAPv2 wire construction, not chosen for security
 	"crypto/sha1" //nolint:gosec // SHA1 is required by MS-CHAPv2/MPPE, not chosen for security
@@ -153,4 +154,74 @@ func hexEncode(b []byte) string {
 		out[i*2+1] = hexdigits[c&0x0f]
 	}
 	return string(out)
+}
+
+// RFC 3079 section 3.4 constants for GetMasterKey / GetAsymmetricStartKey.
+var (
+	magicMasterKey = []byte("This is the MPPE Master Key")
+	magicClientKey = []byte("On the client side, this is the send key; " +
+		"on the server side, it is the receive key.")
+	magicServerKey = []byte("On the client side, this is the receive key; " +
+		"on the server side, it is the send key.")
+	// sha1Pads are the fixed padding blocks GetAsymmetricStartKey hashes
+	// between the master key and the magic string (RFC 3079 section 3.4).
+	sha1Pad1 = bytes.Repeat([]byte{0x00}, 40)
+	sha1Pad2 = bytes.Repeat([]byte{0xf2}, 40)
+)
+
+// GetMasterKey derives the MPPE master key from the password hash and the NT
+// response (RFC 3079 section 3.3).
+func GetMasterKey(password string, ntResponse [NTResponseLen]byte) [16]byte {
+	passwordHash := NTPasswordHash(password)
+	passwordHashHash := ntPasswordHashHash(passwordHash)
+
+	h := sha1.New()
+	h.Write(passwordHashHash[:])
+	h.Write(ntResponse[:])
+	h.Write(magicMasterKey)
+
+	var out [16]byte
+	copy(out[:], h.Sum(nil)[:16])
+	return out
+}
+
+// GetAsymmetricStartKey derives one directional session key from the master
+// key (RFC 3079 section 3.4). isSend selects the client's send key; the
+// receive key uses the other magic string.
+func GetAsymmetricStartKey(masterKey [16]byte, keyLength int, isSend bool) []byte {
+	magic := magicServerKey
+	if isSend {
+		magic = magicClientKey
+	}
+	h := sha1.New()
+	h.Write(masterKey[:])
+	h.Write(sha1Pad1)
+	h.Write(magic)
+	h.Write(sha1Pad2)
+	digest := h.Sum(nil)
+
+	if keyLength > len(digest) {
+		keyLength = len(digest)
+	}
+	out := make([]byte, keyLength)
+	copy(out, digest[:keyLength])
+	return out
+}
+
+// HLAK derives the 32-byte Higher-Layer Authentication Key SSTP binds to the
+// TLS channel (MS-SSTP section 3.2.5.2.3): the 16-byte MPPE send key followed
+// by the 16-byte receive key.
+//
+// PAP produces no keying material and uses an all-zero HLAK instead; only
+// MS-CHAPv2 reaches this path. Getting it wrong does not fail authentication
+// — the server rejects CALL_CONNECTED afterwards, which looks like an
+// unexplained disconnect — so it is covered by RFC test vectors.
+func HLAK(username, password string, authChallenge, peerChallenge [ChallengeLen]byte) [32]byte {
+	ntResponse := GenerateNTResponse(authChallenge, peerChallenge, username, password)
+	masterKey := GetMasterKey(password, ntResponse)
+
+	var out [32]byte
+	copy(out[:16], GetAsymmetricStartKey(masterKey, 16, true))
+	copy(out[16:], GetAsymmetricStartKey(masterKey, 16, false))
+	return out
 }

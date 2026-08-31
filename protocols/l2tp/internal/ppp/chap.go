@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/bclswl0827/govpn/protocols/l2tp/internal/cryptoutil"
-	"github.com/bclswl0827/govpn/protocols/l2tp/internal/mschap"
+	"github.com/bclswl0827/govpn/internal/mschap"
 )
 
 // CHAP codes (RFC 1994), reused by MS-CHAPv2.
