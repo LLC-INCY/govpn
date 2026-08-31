@@ -17,6 +17,13 @@ type Config struct {
 	SkipVerify   bool
 	PrefixLength int
 	Logger       *log.Logger
+
+	// Dialer, when set, establishes the TCP connection the TLS transport is
+	// built on. An embedder that runs inside a VPN tunnel needs this to
+	// protect the socket (Android VpnService.protect, Apple's NE), otherwise
+	// the tunnel's own traffic is routed back into the tunnel it creates.
+	// nil uses a plain net.Dialer.
+	Dialer *net.Dialer
 }
 
 type ServerConfig struct {
