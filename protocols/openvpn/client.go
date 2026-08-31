@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bclswl0827/govpn"
 	"github.com/bclswl0827/govpn/internal/packet"
@@ -171,6 +172,16 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = endpoint.Close()
 		return nil, err
 	}
+	// The connection deadline only bounds control-channel negotiation. Leaving
+	// it armed makes a healthy data channel fail when the handshake timeout
+	// expires, even if packets and keepalives are flowing normally.
+	deadlineErr := errors.Join(rawConn.SetReadDeadline(time.Time{}), rawConn.SetWriteDeadline(time.Time{}))
+	if deadlineErr != nil {
+		_ = endpoint.Close()
+		_ = device.Close()
+		return nil, fmt.Errorf("openvpn: clear handshake deadline: %w", deadlineErr)
+	}
+	c.logf("handshake deadline cleared: transport=%s", network)
 	transport := newTransport(endpoint, device, sendCipher, receiveCipher, pushed.usePeerID, pushed.peerID, config.Compression, pushed.pingInterval, pushed.pingTimeout, config.Logger)
 	done := make(chan error, 1)
 	go transport.run(done)

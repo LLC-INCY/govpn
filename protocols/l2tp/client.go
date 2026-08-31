@@ -42,7 +42,11 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 		_ = conn.Close()
 		return nil, err
 	}
-	runContext, cancelRun := context.WithCancel(ctx)
+	// Start's context bounds negotiation only. Session lifetime is controlled
+	// by Session.Close; tying the engine to the handshake context stops a
+	// successfully established tunnel as soon as its caller cancels that
+	// context after Start returns.
+	runContext, cancelRun := context.WithCancel(context.Background())
 	logger := c.Config.Logger
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
@@ -66,7 +70,7 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 			_ = device.Close()
 		}
 	}()
-	handshakeContext, cancelHandshake := context.WithTimeout(runContext, settings.timeout)
+	handshakeContext, cancelHandshake := context.WithTimeout(ctx, settings.timeout)
 	defer cancelHandshake()
 	c.logf("starting L2TP/IPsec client: remote=%s:%d", c.Config.Server, settings.ikePort)
 	network, err := client.Handshake(handshakeContext)
