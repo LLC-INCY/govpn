@@ -10,7 +10,6 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bclswl0827/govpn"
 	"github.com/bclswl0827/govpn/internal/packet"
@@ -90,7 +89,7 @@ func (c *Client) Start(ctx context.Context) (*govpn.Session, error) {
 	}
 	tlsState := tlsConn.ConnectionState()
 	c.logf("TLS handshake completed: version=0x%04x cipher-suite=0x%04x", tlsState.Version, tlsState.CipherSuite)
-	_ = conn.SetDeadline(time.Time{})
+	setHandshakeDeadline(ctx, conn)
 	clientSource, err := protocol.NewClientKeySource()
 	if err != nil {
 		_ = endpoint.Close()
